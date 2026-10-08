@@ -1,0 +1,8 @@
+node_modules
+data
+.git
+.env
+legacy
+tests
+*.log
+*.bak

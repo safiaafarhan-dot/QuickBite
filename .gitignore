@@ -2,3 +2,5 @@ node_modules/
 data/
 .env
 *.log
+*.bak
+public/images/dishes/_candidate-*

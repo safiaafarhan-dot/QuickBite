@@ -2,7 +2,7 @@
   "name": "quickbite",
   "version": "1.0.0",
   "private": true,
-  "description": "QuickBite — a full-stack food ordering app (Express + SQLite + vanilla JS).",
+  "description": "QuickBite — a full-stack AI-assisted food ordering app (Express + SQLite + vanilla JS).",
   "main": "server/index.js",
   "engines": {
     "node": ">=22.5"
@@ -10,9 +10,17 @@
   "scripts": {
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
+    "migrate": "node scripts/migrate.js",
     "seed": "node scripts/seed.js",
+    "seed:accounts": "node scripts/seed.js --accounts-only",
+    "images": "node scripts/fetch-images.js",
     "test": "node --test \"tests/**/*.test.js\"",
-    "reset": "node -e \"require('node:fs').rmSync('data',{recursive:true,force:true})\" && npm run seed"
+    "test:api": "node --test tests/api.test.js",
+    "test:ui": "node --test tests/ui.test.js",
+    "test:ai": "node --test tests/ai.test.js",
+    "test:security": "node --test tests/security.test.js",
+    "reset": "node -e \"require('node:fs').rmSync('data',{recursive:true,force:true})\" && npm run seed",
+    "audit:deps": "npm audit --omit=dev"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
