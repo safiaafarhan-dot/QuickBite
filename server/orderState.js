@@ -4,6 +4,7 @@ const { db } = require('./db');
 
 /** Ordered lifecycle. `cancelled` is terminal and lives outside the chain. */
 const FLOW = ['placed', 'confirmed', 'preparing', 'out_for_delivery', 'delivered'];
+const ALL_STATUSES = [...FLOW, 'cancelled'];
 
 const LABELS = {
   placed: 'Order placed',
@@ -13,6 +14,43 @@ const LABELS = {
   delivered: 'Delivered',
   cancelled: 'Cancelled',
 };
+
+/**
+ * Which statuses each status may move to. An order only ever moves forward
+ * along the chain, and nothing moves out of a terminal state.
+ */
+const ALLOWED_TRANSITIONS = {
+  placed: ['confirmed', 'preparing', 'cancelled'],
+  confirmed: ['preparing', 'cancelled'],
+  preparing: ['out_for_delivery', 'cancelled'],
+  out_for_delivery: ['delivered', 'cancelled'],
+  delivered: [],
+  cancelled: [],
+};
+
+/** Customers may call off an order only before the kitchen starts cooking. */
+const CUSTOMER_CANCELLABLE = ['placed', 'confirmed'];
+
+const canCustomerCancel = (status) => CUSTOMER_CANCELLABLE.includes(status);
+
+/**
+ * @returns {{ok: true} | {ok: false, reason: string}}
+ */
+function canTransition(from, to) {
+  if (!ALL_STATUSES.includes(to)) return { ok: false, reason: `Unknown status "${to}".` };
+  if (from === to) return { ok: false, reason: `The order is already ${LABELS[to].toLowerCase()}.` };
+
+  const allowed = ALLOWED_TRANSITIONS[from] || [];
+  if (!allowed.includes(to)) {
+    return {
+      ok: false,
+      reason: allowed.length === 0
+        ? `A ${from.replace(/_/g, ' ')} order cannot change status.`
+        : `An order cannot go from "${from}" to "${to}".`,
+    };
+  }
+  return { ok: true };
+}
 
 /**
  * Fraction of the ETA at which each stage begins, so a 35-minute order and a
@@ -42,7 +80,7 @@ const insertEvent = db.prepare('INSERT INTO order_events (order_id, status, note
 const eventExists = db.prepare('SELECT 1 FROM order_events WHERE order_id = ? AND status = ?');
 
 function minutesSince(sqliteUtcTimestamp) {
-  const placed = Date.parse(`${sqliteUtcTimestamp.replace(' ', 'T')}Z`);
+  const placed = Date.parse(`${String(sqliteUtcTimestamp).replace(' ', 'T')}Z`);
   if (Number.isNaN(placed)) return 0;
   return (Date.now() - placed) / 60000;
 }
@@ -76,4 +114,13 @@ function advanceOrders(orderId) {
   for (const row of rows) advanceOne(row);
 }
 
-module.exports = { FLOW, LABELS, advanceOrders, minutesSince };
+module.exports = {
+  FLOW,
+  ALL_STATUSES,
+  LABELS,
+  ALLOWED_TRANSITIONS,
+  canTransition,
+  canCustomerCancel,
+  advanceOrders,
+  minutesSince,
+};
