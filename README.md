@@ -19,7 +19,7 @@ npm run seed      # demo accounts + 45 days of synthetic order history
 npm start         # http://localhost:3000
 ```
 
-`npm run dev` restarts on change. `npm test` runs all 108 tests.
+`npm run dev` restarts on change. `npm test` runs all 140 tests.
 
 ### Demo accounts
 
@@ -173,9 +173,10 @@ QuickBite/
 │   └── images/dishes/      30 photos + CREDITS.md
 ├── scripts/
 │   ├── seed.js             Demo accounts, synthetic history, reviews
+│   ├── visual-qa.js        Screenshot + console/overflow sweep in real Chrome
 │   ├── migrate.js          Deploy-time migration runner
 │   └── fetch-images.js     Pulls openly-licensed dish photos from Commons
-├── tests/                  108 tests across 4 suites
+├── tests/                  140 tests across 7 suites
 ├── data/                   The SQLite file (git-ignored)
 └── legacy/                 The original prototype, kept for reference
 ```
@@ -264,11 +265,14 @@ total. Replays are ignored. The browser saying "paid" changes nothing.
 ## Testing
 
 ```bash
-npm test              # all 108
-npm run test:api      # 43 — auth, cart, coupons, checkout, stock, lifecycle, admin
-npm run test:ai       # 24 — recommender, assistant grounding, forecast honesty
-npm run test:security # 20 — injection, IDOR, rate limits, headers, payments
-npm run test:ui       # 21 — the real pages in jsdom against a live server
+npm test                # all 140
+npm run test:api        # 43 — auth, cart, coupons, checkout, stock, lifecycle, admin
+npm run test:ai         # 24 — recommender, assistant grounding, forecast honesty
+npm run test:security   # 20 — injection, IDOR, rate limits, headers, payments
+npm run test:ui         # 21 — the real pages in jsdom against a live server
+npm run test:browser    # 17 — real Chrome: layout, cascade, CSP, charts, a11y
+npm run test:assets     # 11 — photo files, licences, attribution, CSP hygiene
+npm run test:startup    #  4 — port clashes and production config refusal
 ```
 
 Each suite gets its own throwaway SQLite file, so suites never see each other's
@@ -289,22 +293,46 @@ Highlights of what is actually asserted:
 - the assistant never names a dish or price that is not in the database
 - the forecast refuses to predict below 14 days of history
 - an order can still be placed while the AI endpoints are failing
+- every redistributed photo is attributed with an author, licence and source
 
-### What is **not** covered
+### Browser testing
 
-`tests/ui.test.js` drives the real pages, but **jsdom is not a browser**: it does
-not lay out or paint. So the following remain **unverified**:
+`tests/browser.test.js` drives **real Chrome** through `playwright-core`, using
+the browser already installed on the machine (no download). It guards the faults
+jsdom structurally cannot see — a jsdom test reads `element.hidden === true` and
+passes while the browser still paints the element:
 
-- visual appearance, spacing, colour and typography
-- responsive behaviour at real viewport widths
-- CSS animations, the dark-mode palette as rendered
-- actual image decoding (paths are checked against disk; pixels are not)
+- `[hidden]` genuinely removes an element, for every styled component family
+- signing in actually removes the Sign-in button; a customer never sees the
+  kitchen link; the admin tabs show one view at a time
+- no page scrolls sideways at 320, 390, 820 or 1440 px
+- no Content-Security-Policy violation on any page
+- a failed photo really does fall back to the placeholder
+- the analytics bars have genuine, varying heights
+- Escape closes the cart and focus moves into it; the skip link appears on focus
 
-Browser-based verification was attempted via the Claude-in-Chrome extension and
-**could not be performed** — the extension was not connected in this environment.
-No screenshot or visual check has been made. Worth doing before shipping.
+If Chrome or `playwright-core` is missing, that suite **skips and says so** —
+a skip is never counted as a pass.
 
----
+```bash
+npm run qa:visual       # screenshots at 3 widths + console/network/overflow report
+```
+
+`scripts/visual-qa.js` captures 50+ screenshots into `qa-screenshots/` and
+reports console errors, failed requests, horizontal overflow, broken images and
+clipped text. It is a QA tool, not part of the app.
+
+### What is still **not** covered
+
+- **Human judgement of the visuals.** The screenshots were reviewed and the
+  layout faults they revealed were fixed, but "does this look good" is not
+  something a test asserts.
+- **Browsers other than Chrome.** Firefox and Safari/WebKit are unverified.
+- **Real devices.** Viewport emulation is not the same as a physical phone
+  (touch targets, iOS Safari's dynamic toolbar, notch insets).
+- **Screen readers.** Semantics, labels and focus order are checked
+  programmatically; NVDA/VoiceOver behaviour is not.
+- **Load and concurrency.** No load test has been run.
 
 ## Security
 

@@ -19,6 +19,9 @@ const { MENU } = require('../server/data/menu');
 
 const OUT_DIR = path.join(__dirname, '..', 'public', 'images', 'dishes');
 const CREDITS = path.join(OUT_DIR, 'CREDITS.md');
+// Machine-readable record of what was downloaded. CREDITS.md is rendered from
+// this, so fetching a single dish can never wipe out the other 29 attributions.
+const CREDITS_DATA = path.join(OUT_DIR, 'credits.json');
 const API = 'https://commons.wikimedia.org/w/api.php';
 
 // Wikimedia asks every client to identify itself.
@@ -198,10 +201,63 @@ async function download(url, destination) {
   return buffer.length;
 }
 
+/** Merges new attributions into the sidecar and re-renders CREDITS.md in full. */
+function writeCredits(fresh) {
+  let stored = {};
+  if (fs.existsSync(CREDITS_DATA)) {
+    try {
+      stored = JSON.parse(fs.readFileSync(CREDITS_DATA, 'utf8'));
+    } catch {
+      stored = {};
+    }
+  }
+
+  for (const entry of fresh) {
+    stored[entry.slug] = {
+      dish: entry.dish,
+      file: entry.title,
+      author: entry.author,
+      licence: entry.licence,
+      source: entry.descriptionUrl,
+    };
+  }
+
+  fs.writeFileSync(CREDITS_DATA, `${JSON.stringify(stored, null, 2)}\n`);
+
+  // Render in menu order so the table is easy to scan against the app.
+  const ordered = MENU.map((d) => [d.slug, stored[d.slug]]).filter(([, v]) => v);
+  const missing = MENU.filter((d) => !stored[d.slug]).map((d) => d.name);
+
+  const header = [
+    '# Photo credits',
+    '',
+    'Every dish photograph below comes from Wikimedia Commons under a licence that',
+    'permits redistribution. CC BY and CC BY-SA require attribution, which this file',
+    'provides. It is generated from `credits.json` by `scripts/fetch-images.js`; run',
+    '`node scripts/fetch-images.js --credits-only` to rebuild it.',
+    '',
+    `${ordered.length} of ${MENU.length} dishes credited.`
+      + (missing.length ? ` **Missing: ${missing.join(', ')}**` : ''),
+    '',
+    '| Dish | File | Author | Licence | Source |',
+    '| --- | --- | --- | --- | --- |',
+  ].join('\n');
+
+  const rows = ordered
+    .map(([, c]) => `| ${c.dish} | ${c.file} | ${c.author} | ${c.licence} | [Commons](${c.source}) |`)
+    .join('\n');
+
+  fs.writeFileSync(CREDITS, `${header}\n${rows}\n`);
+  console.log(`\n  CREDITS.md rewritten — ${ordered.length}/${MENU.length} dishes credited`);
+}
+
 async function main() {
   const args = process.argv.slice(2);
   const force = args.includes('--force');
   const candidateMode = args.includes('--candidates');
+  // Rebuild attributions from the pinned/queried sources without re-downloading
+  // any image — used to repair CREDITS.md after a partial run.
+  const creditsOnly = args.includes('--credits-only');
   const only = args.filter((a) => !a.startsWith('--'));
 
   fs.mkdirSync(OUT_DIR, { recursive: true });
@@ -214,7 +270,7 @@ async function main() {
   for (const dish of targets) {
     const file = path.join(OUT_DIR, `${dish.slug}.jpg`);
 
-    if (!force && !candidateMode && fs.existsSync(file)) {
+    if (!force && !candidateMode && !creditsOnly && fs.existsSync(file)) {
       skipped += 1;
       continue;
     }
@@ -244,8 +300,15 @@ async function main() {
       }
 
       const pick = candidates[0];
+
+      if (creditsOnly) {
+        credits.push({ slug: dish.slug, dish: dish.name, ...pick });
+        console.log(`· credit — ${pick.licence} — ${pick.title.slice(0, 46)}`);
+        continue;
+      }
+
       const bytes = await download(pick.thumb, file);
-      credits.push({ dish: dish.name, ...pick });
+      credits.push({ slug: dish.slug, dish: dish.name, ...pick });
       fetched += 1;
       console.log(`${pick.pinned ? '📌' : '✓'} ${(bytes / 1024).toFixed(0)}KB  ${pick.licence}  — ${pick.title.slice(0, 50)}`);
     } catch (err) {
@@ -253,22 +316,7 @@ async function main() {
     }
   }
 
-  if (credits.length > 0) {
-    const existing = fs.existsSync(CREDITS) ? fs.readFileSync(CREDITS, 'utf8') : '';
-    const header =
-      '# Photo credits\n\n' +
-      'Dish photography is sourced from Wikimedia Commons under licences that permit\n' +
-      'redistribution. Re-run `node scripts/fetch-images.js --force` to refresh.\n\n' +
-      '| Dish | File | Author | Licence | Source |\n| --- | --- | --- | --- | --- |\n';
-
-    const rows = credits
-      .map((c) => `| ${c.dish} | ${c.title} | ${c.author} | ${c.licence} | [Commons](${c.descriptionUrl}) |`)
-      .join('\n');
-
-    fs.writeFileSync(CREDITS, existing.startsWith('# Photo credits') && !force
-      ? `${existing.trimEnd()}\n${rows}\n`
-      : `${header}${rows}\n`);
-  }
+  if (credits.length > 0) writeCredits(credits);
 
   console.log(`\nDone — ${fetched} downloaded, ${skipped} already present.`);
 }

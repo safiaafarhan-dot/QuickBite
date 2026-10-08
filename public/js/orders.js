@@ -3,8 +3,8 @@
   'use strict';
 
   const {
-    api, session, money, escapeHtml, imgFallback,
-    formatDateTime, timeAgo, toast, theme,
+    api, session, money, escapeHtml,
+    formatDateTime, timeAgo, toast, theme, installImageFallback,
   } = window.QB;
 
   const el = {};
@@ -96,7 +96,7 @@
           <div class="order-items">
             ${order.items.map((i) => `
               <div class="order-item">
-                <img src="${escapeHtml(i.image)}" alt="" onerror="${imgFallback}" />
+                <img src="${escapeHtml(i.image)}" alt="" />
                 <div>
                   <p class="order-item-name">${escapeHtml(i.name)}</p>
                   <p class="order-item-qty">${i.quantity} × ${money(i.price)}</p>
@@ -369,6 +369,7 @@
 
   (async function init() {
     theme.init();
+    installImageFallback();
 
     const user = await session.restore();
     document.querySelectorAll('.admin-link').forEach((a) => { a.hidden = user?.role !== 'admin'; });

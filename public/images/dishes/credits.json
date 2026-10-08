@@ -1,0 +1,212 @@
+{
+  "garlic-bread": {
+    "dish": "Garlic Bread with Cheese",
+    "file": "Cheese Garlic Bread.jpg",
+    "author": "Saisumanth532",
+    "licence": "CC BY-SA 4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Cheese_Garlic_Bread.jpg"
+  },
+  "chicken-wings": {
+    "dish": "Crispy Chicken Wings",
+    "file": "Chicken wings at Bar Loosister.jpg",
+    "author": "JIP",
+    "licence": "CC BY-SA 4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Chicken_wings_at_Bar_Loosister.jpg"
+  },
+  "paneer-tikka": {
+    "dish": "Paneer Tikka",
+    "file": "Tandoori Paneer Tikka.jpg",
+    "author": "Muskansriv317",
+    "licence": "CC BY-SA 4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Tandoori_Paneer_Tikka.jpg"
+  },
+  "spring-rolls": {
+    "dish": "Veg Spring Rolls",
+    "file": "Boshan Fried Spring Rolls.jpg",
+    "author": "Zheng Zhou",
+    "licence": "CC BY-SA 4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Boshan_Fried_Spring_Rolls.jpg"
+  },
+  "margherita-pizza": {
+    "dish": "Classic Margherita Pizza",
+    "file": "Pizza Margherita ().JPG",
+    "author": "Lombroso",
+    "licence": "CC BY-SA 4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Pizza_Margherita_().JPG"
+  },
+  "pepperoni-pizza": {
+    "dish": "Pepperoni Pizza",
+    "file": "Pizza Tradición Napolitana.jpg",
+    "author": "Rjcastillo",
+    "licence": "CC BY-SA 4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Pizza_Tradici%C3%B3n_Napolitana.jpg"
+  },
+  "farmhouse-pizza": {
+    "dish": "Farmhouse Veggie Pizza",
+    "file": "Photo of 9\" Vegetariana pizza at Woody's Pizzeria.jpg",
+    "author": "Contrapunctus-1",
+    "licence": "CC0",
+    "source": "https://commons.wikimedia.org/wiki/File:Photo_of_9%22_Vegetariana_pizza_at_Woody%27s_Pizzeria.jpg"
+  },
+  "carbonara": {
+    "dish": "Spaghetti Carbonara",
+    "file": "Spaghetti Carbonara 2015.jpg",
+    "author": "jeffreyw",
+    "licence": "CC BY 2.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Spaghetti_Carbonara_2015.jpg"
+  },
+  "arrabbiata": {
+    "dish": "Penne Arrabbiata",
+    "file": "Pasta with tomato sauce (6178622998).jpg",
+    "author": "pelican from Tokyo, Japan",
+    "licence": "CC BY-SA 2.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Pasta_with_tomato_sauce_(6178622998).jpg"
+  },
+  "alfredo": {
+    "dish": "Creamy Alfredo Pasta",
+    "file": "Chicken fettuccine alfredo.JPG",
+    "author": "Dllu",
+    "licence": "CC BY-SA 4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Chicken_fettuccine_alfredo.JPG"
+  },
+  "lasagna": {
+    "dish": "Lasagna al Forno",
+    "file": "Lasagne - stonesoup.jpg",
+    "author": "jules / stonesoup",
+    "licence": "CC BY 2.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Lasagne_-_stonesoup.jpg"
+  },
+  "veggie-burger": {
+    "dish": "Veggie Burger",
+    "file": "Veggie Burger (24835249468).jpg",
+    "author": "Zimt Zauberstab",
+    "licence": "CC BY-SA 2.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Veggie_Burger_(24835249468).jpg"
+  },
+  "chicken-burger": {
+    "dish": "Classic Chicken Burger",
+    "file": "Fried chicken burger .jpg",
+    "author": "Kurt Kaiser",
+    "licence": "CC0",
+    "source": "https://commons.wikimedia.org/wiki/File:Fried_chicken_burger_.jpg"
+  },
+  "bbq-burger": {
+    "dish": "Smoky BBQ Chicken Burger",
+    "file": "Cheeseburger maison.jpg",
+    "author": "Morgane vallée dit aerith",
+    "licence": "Public domain",
+    "source": "https://commons.wikimedia.org/wiki/File:Cheeseburger_maison.jpg"
+  },
+  "chicken-biryani": {
+    "dish": "Chicken Biryani",
+    "file": "Dum Biryani Plate.jpg",
+    "author": "Umesh Tongbra",
+    "licence": "CC BY-SA 3.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Dum_Biryani_Plate.jpg"
+  },
+  "veg-biryani": {
+    "dish": "Hyderabadi Veg Biryani",
+    "file": "Vegetable Biryani IMG 001.jpg",
+    "author": "Phadke09",
+    "licence": "CC BY-SA 4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Vegetable_Biryani_IMG_001.jpg"
+  },
+  "butter-chicken": {
+    "dish": "Butter Chicken",
+    "file": "Butter Chicken, City Grill Kottayam.jpg",
+    "author": "Vis M",
+    "licence": "CC BY-SA 4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Butter_Chicken,_City_Grill_Kottayam.jpg"
+  },
+  "paneer-butter-masala": {
+    "dish": "Paneer Butter Masala",
+    "file": "Paneer Curry with Rice.jpg",
+    "author": "UserWiki",
+    "licence": "CC BY-SA 4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Paneer_Curry_with_Rice.jpg"
+  },
+  "dal-makhani": {
+    "dish": "Dal Makhani",
+    "file": "Dal Makhani..JPG",
+    "author": "Miansari66",
+    "licence": "CC0",
+    "source": "https://commons.wikimedia.org/wiki/File:Dal_Makhani..JPG"
+  },
+  "hakka-noodles": {
+    "dish": "Hakka Noodles",
+    "file": "Veg Noodles.JPG",
+    "author": "Mducityman",
+    "licence": "CC BY-SA 4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Veg_Noodles.JPG"
+  },
+  "chicken-fried-rice": {
+    "dish": "Chicken Fried Rice",
+    "file": "Chicken fried rice - Stir Fry by CK 2023-12-02.jpg",
+    "author": "Andy Li",
+    "licence": "CC0",
+    "source": "https://commons.wikimedia.org/wiki/File:Chicken_fried_rice_-_Stir_Fry_by_CK_2023-12-02.jpg"
+  },
+  "pad-thai": {
+    "dish": "Pad See Ew",
+    "file": "Pad Ciew Noodles with Chicken - Little Thai 2024-06-14.jpg",
+    "author": "Andy Li",
+    "licence": "CC0",
+    "source": "https://commons.wikimedia.org/wiki/File:Pad_Ciew_Noodles_with_Chicken_-_Little_Thai_2024-06-14.jpg"
+  },
+  "vanilla-ice-cream": {
+    "dish": "Vanilla Bean Ice Cream",
+    "file": "Ice cream with garnish.jpg",
+    "author": "Izak.50",
+    "licence": "CC BY 4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Ice_cream_with_garnish.jpg"
+  },
+  "lava-cake": {
+    "dish": "Chocolate Lava Cake",
+    "file": "Vegan Flourless Swiss Chocolate Molten Lava Cake (4865230786).jpg",
+    "author": "Vegan Feast Catering",
+    "licence": "CC BY 2.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Vegan_Flourless_Swiss_Chocolate_Molten_Lava_Cake_(4865230786).jpg"
+  },
+  "gulab-jamun": {
+    "dish": "Gulab Jamun",
+    "file": "Gulab Jamun Delhi.JPG",
+    "author": "Irfan ali k c",
+    "licence": "CC BY-SA 4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Gulab_Jamun_Delhi.JPG"
+  },
+  "tiramisu": {
+    "dish": "Classic Tiramisu",
+    "file": "Tiramisu dessert.jpg",
+    "author": "Navneet Sharma",
+    "licence": "CC BY-SA 4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Tiramisu_dessert.jpg"
+  },
+  "orange-juice": {
+    "dish": "Fresh Orange Juice",
+    "file": "Orange juice without any fruits.jpg",
+    "author": "No machine-readable author provided. Flunse assumed (based on copyright claims).",
+    "licence": "CC BY-SA 3.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Orange_juice_without_any_fruits.jpg"
+  },
+  "mango-lassi": {
+    "dish": "Mango Lassi",
+    "file": "Mango lassi and Nepalese milk tea at restaurant Everest Dine.jpg",
+    "author": "JIP",
+    "licence": "CC BY-SA 4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Mango_lassi_and_Nepalese_milk_tea_at_restaurant_Everest_Dine.jpg"
+  },
+  "cold-brew": {
+    "dish": "Cold Brew Coffee",
+    "file": "Iced Coffee in Glass - Sunshine Coffee - Laramie Cafe (53838344552).jpg",
+    "author": "Tony Webster",
+    "licence": "CC BY 2.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Iced_Coffee_in_Glass_-_Sunshine_Coffee_-_Laramie_Cafe_(53838344552).jpg"
+  },
+  "masala-chai": {
+    "dish": "Masala Chai",
+    "file": "Masala Tea 2.jpg",
+    "author": "Gaurav Dhwaj Khadka",
+    "licence": "CC BY-SA 4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Masala_Tea_2.jpg"
+  }
+}

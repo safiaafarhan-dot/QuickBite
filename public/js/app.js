@@ -3,8 +3,8 @@
   'use strict';
 
   const {
-    api, session, cart, money, escapeHtml, imgFallback, spiceLabel, stars,
-    toast, theme, debounce, newIdempotencyKey,
+    api, session, cart, money, escapeHtml, spiceLabel, stars,
+    toast, theme, debounce, newIdempotencyKey, installImageFallback,
   } = window.QB;
 
   const $ = (sel) => document.querySelector(sel);
@@ -70,7 +70,7 @@
       <article class="dish${soldOut ? ' is-sold-out' : ''}" data-id="${item.id}" data-slug="${escapeHtml(item.slug)}">
         <div class="dish-media" data-open-detail="${escapeHtml(item.slug)}" role="button" tabindex="0"
              aria-label="See details for ${escapeHtml(item.name)}">
-          <img src="${escapeHtml(item.image)}" alt="${escapeHtml(item.name)}" loading="lazy" onerror="${imgFallback}" />
+          <img src="${escapeHtml(item.image)}" alt="${escapeHtml(item.name)}" loading="lazy" />
           <div class="dish-flags">
             ${item.is_popular ? '<span class="flag flag--popular">Popular</span>' : ''}
             ${item.spice_level >= 3 ? '<span class="flag flag--spicy">🌶 Hot</span>' : ''}
@@ -387,7 +387,7 @@
 
       el.picksRail.innerHTML = data.items.map((item) => `
         <article class="rail-card" data-open-detail="${escapeHtml(item.slug)}" role="button" tabindex="0">
-          <img src="${escapeHtml(item.image)}" alt="${escapeHtml(item.name)}" loading="lazy" onerror="${imgFallback}" />
+          <img src="${escapeHtml(item.image)}" alt="${escapeHtml(item.name)}" loading="lazy" />
           <div class="rail-card-body">
             ${data.strategy !== 'popular' ? `<span class="match-pill">${item.match}% match</span>` : ''}
             <h3>${escapeHtml(item.name)}</h3>
@@ -436,7 +436,7 @@
       el.detailContent.innerHTML = `
         <div class="detail-grid">
           <div class="detail-media">
-            <img src="${escapeHtml(item.image)}" alt="${escapeHtml(item.name)}" onerror="${imgFallback}" />
+            <img src="${escapeHtml(item.image)}" alt="${escapeHtml(item.name)}" />
           </div>
 
           <div class="detail-body">
@@ -475,7 +475,7 @@
           <div class="pairing-grid">
             ${pairing.items.map((p) => `
               <button class="pairing-card" data-open-detail="${escapeHtml(p.slug)}">
-                <img src="${escapeHtml(p.image)}" alt="" loading="lazy" onerror="${imgFallback}" />
+                <img src="${escapeHtml(p.image)}" alt="" loading="lazy" />
                 <div><strong>${escapeHtml(p.name)}</strong><span>${money(p.price)}</span></div>
               </button>`).join('')}
           </div>
@@ -558,7 +558,7 @@
 
     el.cartBody.innerHTML = items.map((line) => `
       <div class="cart-line" data-line="${line.item_id}">
-        <img src="${escapeHtml(line.image)}" alt="" onerror="${imgFallback}" />
+        <img src="${escapeHtml(line.image)}" alt="" />
         <div>
           <p class="cart-line-name">${escapeHtml(line.name)}</p>
           <p class="cart-line-price">${money(line.price)} each</p>
@@ -1118,7 +1118,7 @@
     wrap.className = 'assistant-picks';
     wrap.innerHTML = items.map((item) => `
       <div class="pick">
-        <img src="${escapeHtml(item.image)}" alt="" onerror="${imgFallback}" />
+        <img src="${escapeHtml(item.image)}" alt="" />
         <div>
           <strong>${escapeHtml(item.name)}</strong>
           <span>${money(item.price)}</span>
@@ -1223,6 +1223,7 @@
 
   (async function init() {
     theme.init();
+    installImageFallback();
     el.menuGrid.innerHTML = skeletonGrid();
 
     await session.restore();

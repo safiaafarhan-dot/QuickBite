@@ -281,8 +281,25 @@
       ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])
     );
 
-  /** `images/dishes/x.jpg` → a fallback-safe <img> attribute string. */
-  const imgFallback = "this.onerror=null;this.src='images/placeholder.svg'";
+  const PLACEHOLDER = 'images/placeholder.svg';
+
+  /**
+   * Swaps in the placeholder for any image that fails to load.
+   *
+   * This is a single delegated listener rather than an inline `onerror`
+   * attribute, because the Content-Security-Policy (`script-src 'self'`) blocks
+   * inline event handlers — an inline fallback would silently never run.
+   * `error` does not bubble, so the listener is registered in the capture phase.
+   */
+  function installImageFallback() {
+    document.addEventListener('error', (event) => {
+      const img = event.target;
+      if (!(img instanceof HTMLImageElement)) return;
+      if (img.dataset.fallbackApplied === '1') return;   // avoid a loop
+      img.dataset.fallbackApplied = '1';
+      img.src = PLACEHOLDER;
+    }, true);
+  }
 
   function timeAgo(sqliteUtc) {
     const then = Date.parse(`${String(sqliteUtc).replace(' ', 'T')}Z`);
@@ -368,7 +385,7 @@
 
   window.QB = {
     api, session, cart, guestCart: guest,
-    money, escapeHtml, imgFallback, timeAgo, formatDateTime, spiceLabel, stars,
-    toast, theme, debounce, newIdempotencyKey,
+    money, escapeHtml, timeAgo, formatDateTime, spiceLabel, stars,
+    toast, theme, debounce, newIdempotencyKey, installImageFallback, PLACEHOLDER,
   };
 })();

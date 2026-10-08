@@ -3,6 +3,31 @@
 const path = require('node:path');
 const express = require('express');
 
+/*
+ * Configuration is validated before anything else is loaded. `auth.js` also
+ * refuses a missing secret, but it does so at require time — which surfaces as
+ * an unhandled throw and a stack trace. Checking here, first, lets an operator
+ * read what is wrong instead of decoding a trace.
+ */
+if (require.main === module) {
+  const missing = [];
+  if (process.env.NODE_ENV === 'production') {
+    if (!process.env.JWT_SECRET) missing.push('JWT_SECRET');
+  }
+
+  if (missing.length > 0) {
+    console.error(`\n  ✗ Refusing to start: ${missing.join(', ')} must be set when NODE_ENV=production.`);
+    console.error('\n    Generate a secret with:');
+    console.error('      node -e "console.log(require(\'crypto\').randomBytes(48).toString(\'hex\'))"');
+    console.error('\n    Then set it in the environment (or .env) and start again.\n');
+    process.exit(1);
+  }
+
+  if (process.env.NODE_ENV === 'production' && !process.env.PAYMENT_WEBHOOK_SECRET) {
+    console.warn('  ⚠ PAYMENT_WEBHOOK_SECRET is unset — the payment webhook will reject every call.\n');
+  }
+}
+
 const { db, DB_FILE } = require('./db');
 const { attachUser } = require('./auth');
 const { securityHeaders, rateLimit, requestLogger } = require('./middleware');
@@ -123,15 +148,28 @@ app.use((err, req, res, _next) => {
 /* ------------------------------------------------------------------ */
 
 if (require.main === module) {
-  if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
-    console.error('Refusing to start: JWT_SECRET must be set when NODE_ENV=production.');
-    process.exit(1);
-  }
-
   const server = app.listen(PORT, () => {
     console.log(`\n  🍔 QuickBite running at http://localhost:${PORT}`);
     console.log(`  📦 Database: ${DB_FILE}`);
     console.log(`  🤖 AI assistant: ${process.env.ANTHROPIC_API_KEY ? 'LLM-backed' : 'built-in rules'}\n`);
+  });
+
+  /*
+   * Without a listener here, a busy port raises an unhandled 'error' event and
+   * the operator gets a stack trace rather than something they can act on.
+   */
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`\n  ✗ Port ${PORT} is already in use.`);
+      console.error('    Another QuickBite may still be running. Stop it, or start this one');
+      console.error('    on a different port:   PORT=3001 npm start\n');
+    } else if (err.code === 'EACCES') {
+      console.error(`\n  ✗ Not allowed to bind port ${PORT}. Ports below 1024 need elevated`);
+      console.error('    privileges — use a higher port and put a reverse proxy in front.\n');
+    } else {
+      console.error(`\n  ✗ Could not start the server: ${err.message}\n`);
+    }
+    process.exit(1);
   });
 
   const shutdown = (signal) => {

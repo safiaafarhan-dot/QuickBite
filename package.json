@@ -20,7 +20,12 @@
     "test:ai": "node --test tests/ai.test.js",
     "test:security": "node --test tests/security.test.js",
     "reset": "node -e \"require('node:fs').rmSync('data',{recursive:true,force:true})\" && npm run seed",
-    "audit:deps": "npm audit --omit=dev"
+    "audit:deps": "npm audit --omit=dev",
+    "test:browser": "node --test tests/browser.test.js",
+    "test:assets": "node --test tests/assets.test.js",
+    "test:startup": "node --test tests/startup.test.js",
+    "qa:visual": "node scripts/visual-qa.js",
+    "credits": "node scripts/fetch-images.js --credits-only"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -28,6 +33,7 @@
     "jsonwebtoken": "^9.0.2"
   },
   "devDependencies": {
-    "jsdom": "^25.0.1"
+    "jsdom": "^25.0.1",
+    "playwright-core": "^1.64.0"
   }
 }

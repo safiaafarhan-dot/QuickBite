@@ -115,6 +115,14 @@ body {
 
 body.no-scroll { overflow: hidden; }
 
+/*
+ * The user-agent rule for [hidden] is `display: none`, which loses to any
+ * author rule that sets `display` — and most of our components set one. Without
+ * this, `element.hidden = true` silently does nothing for anything styled as
+ * flex or grid.
+ */
+[hidden] { display: none !important; }
+
 img, svg { display: block; max-width: 100%; }
 a { color: inherit; }
 button, input, select, textarea { font: inherit; color: inherit; }
@@ -1192,10 +1200,21 @@ h1, h2, h3, h4 { line-height: 1.2; letter-spacing: -.022em; font-weight: 700; }
 
 /* Charts (inline SVG / CSS bars, no libraries) */
 .chart { display: grid; gap: 10px; }
-.bars { display: flex; align-items: flex-end; gap: 4px; height: 148px; padding-top: 8px; }
-.bar-col { flex: 1; display: grid; gap: 5px; justify-items: center; align-content: end; min-width: 0; }
+.bars { display: flex; align-items: stretch; gap: 4px; height: 160px; padding-top: 8px; }
+
+/*
+ * The bars are sized with a percentage height, which only resolves against a
+ * DEFINITE height. The column therefore has to fill the track (height:100%) and
+ * reserve the label in its own auto row — otherwise every bar collapses to its
+ * min-height and the chart draws as a flat line.
+ */
+.bar-col {
+  flex: 1; min-width: 0; height: 100%;
+  display: grid; grid-template-rows: 1fr auto; gap: 5px;
+  justify-items: center;
+}
 .bar {
-  width: 100%; min-height: 3px;
+  width: 100%; min-height: 3px; align-self: end;
   background: linear-gradient(180deg, var(--brand), var(--saffron));
   border-radius: 4px 4px 0 0;
   transition: height var(--t-slow);
@@ -1258,8 +1277,26 @@ h1, h2, h3, h4 { line-height: 1.2; letter-spacing: -.022em; font-weight: 700; }
 
   .filter-row--split { flex-direction: column; align-items: stretch; }
   .filter-row { gap: 9px; }
-  .chips { overflow-x: auto; flex-wrap: nowrap; padding-bottom: 5px; margin-inline: -20px; padding-inline: 20px; }
+  .chips {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    padding-bottom: 5px;
+    margin-inline: -20px;
+    padding-inline: 20px;
+    /* A flex item defaults to min-width:auto and so refuses to shrink below its
+       content; without this the chip row drags the whole page sideways. */
+    min-width: 0;
+    max-width: 100vw;
+    scrollbar-width: none;
+  }
+  .chips::-webkit-scrollbar { display: none; }
   .chip { flex-shrink: 0; }
+
+  /* Same reason: these rows hold the scrolling chip strip. */
+  .filter-row, .filters { min-width: 0; }
+
+  /* Leave room for the floating assistant button over the last row. */
+  main { padding-bottom: 72px; }
 
   .menu-grid { grid-template-columns: repeat(auto-fill, minmax(158px, 1fr)); }
   .dish-body { padding: 11px 12px 13px; gap: 6px; }

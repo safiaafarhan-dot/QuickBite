@@ -2,7 +2,7 @@
 (() => {
   'use strict';
 
-  const { api, session, money, escapeHtml, timeAgo, toast, theme } = window.QB;
+  const { api, session, money, escapeHtml, timeAgo, toast, theme, installImageFallback } = window.QB;
 
   const el = {};
   for (const id of [
@@ -358,6 +358,7 @@
 
   (async function init() {
     theme.init();
+    installImageFallback();
     const user = await session.restore();
 
     if (!user) {

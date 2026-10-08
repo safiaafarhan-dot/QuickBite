@@ -176,12 +176,14 @@ test('the home page renders the whole menu from the API', async () => {
 test('skeletons are shown while the menu loads, then replaced', async () => {
   const { window, doc } = await loadPage('index.html');
 
-  // The grid is filled with skeletons synchronously during boot.
-  assert.ok(doc.querySelector('.skeleton-card'), 'a loading skeleton is rendered immediately');
+  // The grid is filled with skeletons synchronously during boot. Scope the
+  // assertions to the menu grid — the recommendation rail loads independently
+  // and has skeletons of its own.
+  assert.ok(doc.querySelector('#menuGrid .skeleton-card'), 'a loading skeleton is rendered immediately');
   assert.equal(doc.getElementById('menuGrid').getAttribute('aria-busy'), 'true');
 
   await waitFor(() => doc.querySelector('.dish'), 'real cards');
-  assert.equal(doc.querySelector('.skeleton-card'), null, 'skeletons are gone once data arrives');
+  assert.equal(doc.querySelector('#menuGrid .skeleton-card'), null, 'skeletons are gone once data arrives');
   assert.equal(doc.getElementById('menuGrid').getAttribute('aria-busy'), 'false');
 
   window.close();
