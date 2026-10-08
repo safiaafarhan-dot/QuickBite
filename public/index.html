@@ -3,42 +3,52 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="description" content="QuickBite — order fresh pizza, pasta, burgers and desserts with live order tracking." />
+  <meta name="description" content="QuickBite — 30 dishes cooked to order, server-honest pricing, AI dish recommendations and live order tracking." />
+  <meta name="theme-color" content="#e4432d" />
   <title>QuickBite — Food delivered fast</title>
   <link rel="icon" href="images/logo.png" />
+  <link rel="preload" as="image" href="images/dishes/margherita-pizza.jpg" />
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
 
+<a class="skip-link" href="#menu">Skip to the menu</a>
+
 <header class="site-header" id="siteHeader">
   <div class="shell header-row">
     <a class="brand" href="/">
-      <img src="images/logo.png" alt="" width="40" height="40" />
+      <img src="images/logo.png" alt="" width="38" height="38" />
       <span>QuickBite</span>
     </a>
 
     <nav class="main-nav" aria-label="Main">
-      <a href="#menu">Menu</a>
+      <a href="#menu" aria-current="page">Menu</a>
+      <a href="#picks">For you</a>
       <a href="#how">How it works</a>
       <a href="orders.html">My orders</a>
-      <a href="admin.html" class="admin-link" hidden>Admin</a>
+      <a href="admin.html" class="admin-link" hidden>Kitchen</a>
     </nav>
 
     <div class="header-actions">
       <button class="icon-btn" data-theme-toggle aria-label="Switch theme">🌙</button>
 
       <div class="account" id="account">
-        <button class="ghost-btn" id="signInBtn">Sign in</button>
-        <div class="account-menu" id="accountMenu" hidden>
-          <button class="ghost-btn account-trigger" id="accountTrigger" aria-expanded="false">
+        <button class="btn btn--ghost btn--sm" id="signInBtn">Sign in</button>
+
+        <div id="accountMenu" hidden>
+          <button class="account-trigger" id="accountTrigger" aria-expanded="false" aria-haspopup="true">
             <span class="avatar" id="avatar">P</span>
             <span id="accountName">Account</span>
           </button>
-          <div class="dropdown" id="accountDropdown" hidden>
-            <p class="dropdown-email" id="accountEmail"></p>
-            <a href="orders.html">My orders</a>
-            <a href="admin.html" class="admin-link" hidden>Admin dashboard</a>
-            <button id="signOutBtn">Sign out</button>
+          <div class="dropdown" id="accountDropdown" hidden role="menu">
+            <div class="dropdown-head">
+              <strong id="accountFullName"></strong>
+              <span id="accountEmail"></span>
+            </div>
+            <a href="orders.html" role="menuitem">📦 My orders</a>
+            <button id="addressesBtn" role="menuitem">📍 Saved addresses</button>
+            <a href="admin.html" class="admin-link" role="menuitem" hidden>🍳 Kitchen dashboard</a>
+            <button id="signOutBtn" role="menuitem">↪ Sign out</button>
           </div>
         </div>
       </div>
@@ -50,111 +60,218 @@
   </div>
 </header>
 
-<main>
-  <!-- ---------------------------------------------------------------- -->
+<main id="main">
+
+  <!-- ================================================================ -->
   <section class="hero">
     <div class="shell hero-grid">
-      <div class="hero-copy">
+      <div>
         <p class="eyebrow">Fresh · Fast · 30-minute delivery</p>
-        <h1>Real food, <span>delivered hot.</span></h1>
+        <h1>Real food, <em>delivered hot.</em></h1>
         <p class="lede">
-          Wood-fired pizza, slow-cooked biryani and hand-rolled pasta from our kitchen to
-          your door. Track every order live, from pan to doorstep.
+          Thirty dishes cooked to order — wood-fired pizza, dum biryani, hand-rolled
+          pasta and more. Honest prices, no hidden charges, and live tracking from
+          pan to doorstep.
         </p>
-        <div class="hero-cta">
-          <a class="btn btn--primary" href="#menu">Browse the menu</a>
-          <a class="btn btn--ghost" href="orders.html">Track an order</a>
+
+        <form class="hero-search" id="heroSearchForm" role="search">
+          <input class="field" type="search" id="heroSearch" placeholder="Search for a dish, cuisine or craving…" aria-label="Search the menu" autocomplete="off" />
+          <button class="btn btn--primary" type="submit">Search</button>
+        </form>
+
+        <div class="quick-chips" id="quickChips">
+          <button class="quick-chip" data-quick="biryani">🍛 Biryani</button>
+          <button class="quick-chip" data-quick="pizza">🍕 Pizza</button>
+          <button class="quick-chip" data-quick="dessert">🍰 Desserts</button>
+          <button class="quick-chip" data-quick="veg">🟢 Pure veg</button>
+          <button class="quick-chip" data-quick="under300">💸 Under ₹300</button>
         </div>
+
         <ul class="hero-stats">
-          <li><strong id="statItems">6</strong><span>dishes on the menu</span></li>
+          <li><strong id="statDishes">30</strong><span>dishes on the menu</span></li>
           <li><strong>₹40</strong><span>delivery, free over ₹500</span></li>
-          <li><strong>4.6★</strong><span>average rating</span></li>
+          <li><strong id="statRating">4.6★</strong><span>average rating</span></li>
         </ul>
       </div>
+
       <div class="hero-art">
-        <img src="images/pizza.jpeg" alt="Margherita pizza fresh from the oven" class="hero-img hero-img--main" />
-        <img src="images/burger.webp" alt="Veggie burger" class="hero-img hero-img--small" />
+        <img class="hero-img hero-img--a" src="images/dishes/margherita-pizza.jpg" alt="Margherita pizza fresh from the oven" width="560" height="420" />
+        <img class="hero-img hero-img--b" src="images/dishes/chicken-biryani.jpg" alt="Chicken dum biryani" width="400" height="300" />
+        <img class="hero-img hero-img--c" src="images/dishes/lava-cake.jpg" alt="Chocolate lava cake" width="300" height="225" />
         <div class="hero-badge">
-          <strong>Live tracking</strong>
-          <span>Placed → Cooking → On the way</span>
+          <span class="dot" aria-hidden="true"></span>
+          <div>
+            <strong>Live tracking</strong>
+            <span>Placed → Cooking → On the way</span>
+          </div>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- ---------------------------------------------------------------- -->
-  <section class="menu-section" id="menu">
+  <!-- ================================================================ -->
+  <section class="section" id="picks" aria-labelledby="picksHeading">
     <div class="shell">
       <header class="section-head">
         <div>
-          <h2>Our menu</h2>
-          <p>Everything is cooked to order. Prices include no hidden charges.</p>
+          <h2 id="picksHeading">Picked for you</h2>
+          <p id="picksExplanation">Loading recommendations…</p>
         </div>
-        <div class="search-wrap">
-          <input type="search" id="searchInput" placeholder="Search dishes…" aria-label="Search the menu" autocomplete="off" />
-        </div>
+        <span class="badge badge--veg" id="picksStrategy" hidden></span>
       </header>
-
-      <div class="filters">
-        <div class="chips" id="categoryChips" role="group" aria-label="Filter by category"></div>
-        <div class="filter-right">
-          <div class="chips chips--diet" role="group" aria-label="Filter by diet">
-            <button class="chip is-active" data-diet="">All</button>
-            <button class="chip" data-diet="veg">🟢 Veg</button>
-            <button class="chip" data-diet="nonveg">🔴 Non-veg</button>
-          </div>
-          <label class="sort">
-            <span class="visually-hidden">Sort by</span>
-            <select id="sortSelect">
-              <option value="">Recommended</option>
-              <option value="price-asc">Price: low to high</option>
-              <option value="price-desc">Price: high to low</option>
-              <option value="rating">Top rated</option>
-              <option value="name">A–Z</option>
-            </select>
-          </label>
-        </div>
-      </div>
-
-      <div class="menu-grid" id="menuGrid" aria-live="polite"></div>
-      <p class="empty-state" id="menuEmpty" hidden>No dishes match that search. Try another filter.</p>
+      <div class="rail" id="picksRail" aria-live="polite"></div>
     </div>
   </section>
 
-  <!-- ---------------------------------------------------------------- -->
-  <section class="how" id="how">
+  <!-- ================================================================ -->
+  <section class="section section--tint" id="menu" aria-labelledby="menuHeading">
     <div class="shell">
-      <h2>How it works</h2>
+      <header class="section-head">
+        <div>
+          <h2 id="menuHeading">Our menu</h2>
+          <p>Everything is cooked to order. Taxes shown at checkout — nothing hidden.</p>
+        </div>
+        <input class="field" type="search" id="searchInput" placeholder="Search dishes…" aria-label="Search the menu" autocomplete="off" style="max-width:300px" />
+      </header>
+
+      <div class="filters">
+        <div class="filter-row">
+          <div class="chips" id="categoryChips" role="group" aria-label="Filter by category"></div>
+        </div>
+
+        <div class="filter-row filter-row--split">
+          <div class="filter-row">
+            <div class="chips" role="group" aria-label="Filter by diet">
+              <button class="chip is-active" data-diet="">All</button>
+              <button class="chip" data-diet="veg">🟢 Veg</button>
+              <button class="chip" data-diet="nonveg">🔴 Non-veg</button>
+            </div>
+
+            <label class="range-control">
+              <span>Up to</span>
+              <input type="range" id="priceRange" min="90" max="750" step="10" value="750" aria-label="Maximum price" />
+              <output id="priceOutput">₹750</output>
+            </label>
+
+            <label class="range-control">
+              <span>Spice</span>
+              <input type="range" id="spiceRange" min="0" max="3" step="1" value="3" aria-label="Maximum spice level" />
+              <output id="spiceOutput">Any</output>
+            </label>
+          </div>
+
+          <div class="filter-row">
+            <span class="result-count" id="resultCount"></span>
+            <label>
+              <span class="visually-hidden">Sort by</span>
+              <select class="select" id="sortSelect">
+                <option value="">Recommended</option>
+                <option value="price-asc">Price: low to high</option>
+                <option value="price-desc">Price: high to low</option>
+                <option value="rating">Top rated</option>
+                <option value="quickest">Quickest to make</option>
+                <option value="name">A–Z</option>
+              </select>
+            </label>
+            <button class="btn btn--quiet btn--sm" id="resetFilters" hidden>Clear filters</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="menu-grid" id="menuGrid" aria-live="polite" aria-busy="true"></div>
+    </div>
+  </section>
+
+  <!-- ================================================================ -->
+  <section class="section" id="how" aria-labelledby="howHeading">
+    <div class="shell">
+      <header class="section-head" style="justify-content:center;text-align:center">
+        <div><h2 id="howHeading">How it works</h2></div>
+      </header>
+
       <ol class="steps">
-        <li><span class="step-num">1</span><h3>Pick your food</h3><p>Browse the menu, set quantities and add dishes to your cart.</p></li>
-        <li><span class="step-num">2</span><h3>Checkout securely</h3><p>Totals, taxes and coupons are calculated on our server — no surprises.</p></li>
-        <li><span class="step-num">3</span><h3>Track it live</h3><p>Watch your order move from the kitchen to your door in real time.</p></li>
+        <li>
+          <span class="step-num">1</span>
+          <h3>Pick your food</h3>
+          <p>Browse 30 dishes, filter by diet, budget or spice, and let the assistant suggest what fits.</p>
+        </li>
+        <li>
+          <span class="step-num">2</span>
+          <h3>Checkout securely</h3>
+          <p>Totals, taxes and coupons are all calculated on our server. The price you see is the price you pay.</p>
+        </li>
+        <li>
+          <span class="step-num">3</span>
+          <h3>Track it live</h3>
+          <p>Watch your order move from the kitchen to your door, and cancel free before cooking starts.</p>
+        </li>
       </ol>
+
       <div class="coupon-strip" id="couponStrip"></div>
     </div>
   </section>
 </main>
 
 <footer class="site-footer">
-  <div class="shell footer-row">
-    <div>
-      <a class="brand brand--footer" href="/">
-        <img src="images/logo.png" alt="" width="36" height="36" /><span>QuickBite</span>
-      </a>
-      <p>Hot food, honest prices, delivered across the city.</p>
+  <div class="shell">
+    <div class="footer-grid">
+      <div>
+        <a class="brand" href="/"><img src="images/logo.png" alt="" width="36" height="36" /><span>QuickBite</span></a>
+        <p>Hot food, honest prices, delivered across the city. Built as a full-stack demonstration — no real orders are cooked.</p>
+      </div>
+      <div class="footer-col">
+        <h4>Order</h4>
+        <a href="#menu">Full menu</a>
+        <a href="#picks">Recommended</a>
+        <a href="orders.html">My orders</a>
+      </div>
+      <div class="footer-col">
+        <h4>About</h4>
+        <a href="#how">How it works</a>
+        <a href="images/dishes/CREDITS.md">Photo credits</a>
+        <a href="/api/health">Service status</a>
+      </div>
     </div>
-    <div class="footer-links">
-      <a href="#menu">Menu</a>
-      <a href="orders.html">My orders</a>
-      <a href="#how">How it works</a>
+    <div class="footer-base">
+      <span>© 2025 QuickBite. All rights reserved.</span>
+      <span>Dish photography from Wikimedia Commons under open licences.</span>
     </div>
-    <p class="copyright">© 2025 QuickBite. All rights reserved.</p>
   </div>
 </footer>
 
-<!-- ------------------------------------------------------------------ -->
-<!-- Cart drawer                                                         -->
-<aside class="drawer" id="cartDrawer" aria-hidden="true" aria-labelledby="cartTitle" role="dialog">
+<!-- ================================================================== -->
+<!-- AI assistant                                                        -->
+<button class="assistant-fab" id="assistantFab" aria-label="Open the menu assistant">
+  ✨ <span>Ask the menu</span>
+</button>
+
+<aside class="assistant" id="assistant" role="dialog" aria-labelledby="assistantTitle" aria-hidden="true">
+  <header class="assistant-head">
+    <span class="avatar" aria-hidden="true">✨</span>
+    <div>
+      <strong id="assistantTitle">Menu assistant</strong>
+      <span id="assistantMode">Answers from today's menu</span>
+    </div>
+    <button class="icon-btn" id="assistantClose" aria-label="Close the assistant">✕</button>
+  </header>
+
+  <div class="assistant-log" id="assistantLog" aria-live="polite"></div>
+
+  <div class="assistant-chips" id="assistantChips">
+    <button>Something spicy and vegetarian</button>
+    <button>Dinner for two under ₹800</button>
+    <button>I'm in a hurry</button>
+    <button>What's good for dessert?</button>
+  </div>
+
+  <form class="assistant-form" id="assistantForm">
+    <input class="field" id="assistantInput" placeholder="Ask about the menu…" aria-label="Ask the menu assistant" autocomplete="off" maxlength="300" />
+    <button class="btn btn--primary btn--sm" type="submit" aria-label="Send">→</button>
+  </form>
+</aside>
+
+<!-- Cart drawer -->
+<aside class="drawer" id="cartDrawer" role="dialog" aria-hidden="true" aria-labelledby="cartTitle">
   <header class="drawer-head">
     <h2 id="cartTitle">Your cart</h2>
     <button class="icon-btn" id="closeCart" aria-label="Close cart">✕</button>
@@ -164,7 +281,7 @@
 
   <footer class="drawer-foot" id="cartFoot" hidden>
     <form class="coupon-form" id="couponForm">
-      <input type="text" id="couponInput" placeholder="Coupon code" aria-label="Coupon code" autocomplete="off" />
+      <input class="field" type="text" id="couponInput" placeholder="Coupon code" aria-label="Coupon code" autocomplete="off" />
       <button class="btn btn--ghost btn--sm" type="submit">Apply</button>
     </form>
     <p class="coupon-msg" id="couponMsg" hidden></p>
@@ -175,40 +292,96 @@
   </footer>
 </aside>
 
-<!-- Checkout modal -->
-<div class="modal" id="checkoutModal" aria-hidden="true" role="dialog" aria-labelledby="checkoutTitle">
+<!-- Dish detail -->
+<div class="modal" id="detailModal" role="dialog" aria-hidden="true" aria-labelledby="detailTitle">
+  <div class="modal-card modal-card--wide">
+    <div class="modal-head">
+      <h2 id="detailTitle">Dish</h2>
+      <button class="icon-btn" data-close-modal aria-label="Close">✕</button>
+    </div>
+    <div id="detailContent"></div>
+  </div>
+</div>
+
+<!-- Checkout -->
+<div class="modal" id="checkoutModal" role="dialog" aria-hidden="true" aria-labelledby="checkoutTitle">
   <div class="modal-card">
-    <header class="modal-head">
+    <div class="modal-head">
       <h2 id="checkoutTitle">Delivery details</h2>
       <button class="icon-btn" data-close-modal aria-label="Close">✕</button>
-    </header>
-    <form id="checkoutForm" class="form" novalidate>
-      <label>Name<input name="name" required autocomplete="name" /></label>
-      <label>Phone<input name="phone" required placeholder="+91 98765 43210" autocomplete="tel" /></label>
-      <label>Delivery address<textarea name="address" rows="3" required placeholder="Flat, street, area, city, PIN" autocomplete="street-address"></textarea></label>
-      <label>Notes for the kitchen (optional)<textarea name="notes" rows="2" placeholder="Less spicy, ring the bell…"></textarea></label>
+    </div>
 
-      <fieldset class="payment">
+    <form id="checkoutForm" class="form" novalidate>
+      <div id="savedAddresses" hidden>
+        <label style="margin-bottom:8px">Deliver to</label>
+        <div class="address-list" id="addressList"></div>
+        <button class="link-btn" type="button" id="useNewAddress" style="margin-top:8px">Use a different address</button>
+      </div>
+
+      <div id="addressFields">
+        <div class="form-row">
+          <label>Name<input name="name" required autocomplete="name" /></label>
+          <label>Phone<input name="phone" required placeholder="+91 98765 43210" autocomplete="tel" /></label>
+        </div>
+        <label style="margin-top:14px">Delivery address
+          <textarea name="address" rows="3" required placeholder="Flat, street, area, city, PIN" autocomplete="street-address"></textarea>
+        </label>
+        <label class="switch" style="margin-top:10px">
+          <input type="checkbox" id="saveAddress" />
+          <span>Save this address for next time</span>
+        </label>
+      </div>
+
+      <label>Notes for the kitchen (optional)
+        <textarea name="notes" rows="2" placeholder="Less spicy, ring the bell…" maxlength="500"></textarea>
+      </label>
+
+      <fieldset class="fieldset">
         <legend>Payment method</legend>
         <label class="radio"><input type="radio" name="payment_method" value="cod" checked /><span>Cash on delivery</span></label>
-        <label class="radio"><input type="radio" name="payment_method" value="upi" /><span>UPI</span></label>
+        <label class="radio"><input type="radio" name="payment_method" value="upi" /><span>UPI <small style="color:var(--text-3)">(sandbox)</small></span></label>
         <label class="radio"><input type="radio" name="payment_method" value="card" /><span>Card on delivery</span></label>
       </fieldset>
 
       <div class="order-summary" id="checkoutSummary"></div>
       <p class="form-error" id="checkoutError" hidden></p>
-      <button class="btn btn--primary btn--block" type="submit" id="placeOrderBtn">Place order</button>
+      <button class="btn btn--primary btn--block btn--lg" type="submit" id="placeOrderBtn">Place order</button>
     </form>
   </div>
 </div>
 
-<!-- Auth modal -->
-<div class="modal" id="authModal" aria-hidden="true" role="dialog" aria-labelledby="authTitle">
+<!-- Addresses -->
+<div class="modal" id="addressModal" role="dialog" aria-hidden="true" aria-labelledby="addressTitle">
+  <div class="modal-card">
+    <div class="modal-head">
+      <h2 id="addressTitle">Saved addresses</h2>
+      <button class="icon-btn" data-close-modal aria-label="Close">✕</button>
+    </div>
+    <div id="addressManager"></div>
+    <form id="addressForm" class="form" style="margin-top:18px">
+      <div class="form-row">
+        <label>Label<input name="label" placeholder="Home" /></label>
+        <label>Recipient<input name="recipient" required /></label>
+      </div>
+      <div class="form-row">
+        <label>Phone<input name="phone" required placeholder="+91 98765 43210" /></label>
+        <label>PIN code<input name="pincode" placeholder="560001" /></label>
+      </div>
+      <label>Address<textarea name="line1" rows="2" required placeholder="Flat, street, area"></textarea></label>
+      <label>City<input name="city" placeholder="Bengaluru" /></label>
+      <p class="form-error" id="addressError" hidden></p>
+      <button class="btn btn--primary btn--block" type="submit">Save address</button>
+    </form>
+  </div>
+</div>
+
+<!-- Auth -->
+<div class="modal" id="authModal" role="dialog" aria-hidden="true" aria-labelledby="authTitle">
   <div class="modal-card modal-card--narrow">
-    <header class="modal-head">
+    <div class="modal-head">
       <h2 id="authTitle">Welcome back</h2>
       <button class="icon-btn" data-close-modal aria-label="Close">✕</button>
-    </header>
+    </div>
 
     <div class="tabs" role="tablist">
       <button class="tab is-active" data-auth-tab="login" role="tab" aria-selected="true">Sign in</button>
@@ -218,21 +391,20 @@
     <form id="authForm" class="form" novalidate>
       <label data-auth-only="register" hidden>Name<input name="name" autocomplete="name" /></label>
       <label>Email<input name="email" type="email" required autocomplete="email" /></label>
-      <label>Password<input name="password" type="password" required minlength="6" autocomplete="current-password" /></label>
-      <label data-auth-only="register" hidden>Phone (optional)<input name="phone" autocomplete="tel" /></label>
+      <label>Password<input name="password" type="password" required autocomplete="current-password" /></label>
       <p class="form-error" id="authError" hidden></p>
       <button class="btn btn--primary btn--block" type="submit" id="authSubmit">Sign in</button>
     </form>
 
     <p class="demo-hint">
-      Demo accounts — customer <code>demo@quickbite.test</code> / <code>demo123</code>,
-      admin <code>admin@quickbite.test</code> / <code>admin123</code>
+      Demo accounts — customer <code>demo@quickbite.test</code> / <code>demo1234</code>,
+      kitchen <code>admin@quickbite.test</code> / <code>admin1234</code>
     </p>
   </div>
 </div>
 
 <!-- Order confirmation -->
-<div class="modal" id="successModal" aria-hidden="true" role="dialog" aria-labelledby="successTitle">
+<div class="modal" id="successModal" role="dialog" aria-hidden="true" aria-labelledby="successTitle">
   <div class="modal-card modal-card--narrow success-card">
     <div class="success-mark">✓</div>
     <h2 id="successTitle">Order placed!</h2>

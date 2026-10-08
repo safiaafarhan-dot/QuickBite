@@ -13,25 +13,26 @@
   /* ---------------------------------------------------------------- */
 
   class ApiError extends Error {
-    constructor(message, status) {
+    constructor(message, status, payload) {
       super(message);
       this.name = 'ApiError';
       this.status = status;
+      this.payload = payload || {};
     }
   }
 
-  async function request(path, { method = 'GET', body, auth = true } = {}) {
-    const headers = {};
-    if (body !== undefined) headers['Content-Type'] = 'application/json';
+  async function request(path, { method = 'GET', body, auth = true, headers = {} } = {}) {
+    const requestHeaders = { ...headers };
+    if (body !== undefined) requestHeaders['Content-Type'] = 'application/json';
 
     const token = localStorage.getItem(TOKEN_KEY);
-    if (auth && token) headers.Authorization = `Bearer ${token}`;
+    if (auth && token) requestHeaders.Authorization = `Bearer ${token}`;
 
     let res;
     try {
       res = await fetch(`/api${path}`, {
         method,
-        headers,
+        headers: requestHeaders,
         body: body === undefined ? undefined : JSON.stringify(body),
       });
     } catch {
@@ -41,32 +42,42 @@
     const payload = res.status === 204 ? {} : await res.json().catch(() => ({}));
 
     if (!res.ok) {
+      // An expired or revoked token should quietly sign the user out rather
+      // than leaving the page in a half-authenticated state.
       if (res.status === 401 && token) session.clear();
-      throw new ApiError(payload.error || `Request failed (${res.status})`, res.status);
+      throw new ApiError(payload.error || `Request failed (${res.status})`, res.status, payload);
     }
     return payload;
   }
+
+  /** Builds a query string, dropping empty values. */
+  const qs = (params) => {
+    const search = new URLSearchParams(
+      Object.entries(params).filter(([, v]) => v !== '' && v != null && v !== false)
+    ).toString();
+    return search ? `?${search}` : '';
+  };
 
   const api = {
     ApiError,
     health: () => request('/health', { auth: false }),
 
+    // Auth
     register: (data) => request('/auth/register', { method: 'POST', body: data, auth: false }),
     login: (data) => request('/auth/login', { method: 'POST', body: data, auth: false }),
     me: () => request('/auth/me'),
     updateProfile: (data) => request('/auth/me', { method: 'PATCH', body: data }),
 
-    menu: (params = {}) => {
-      const qs = new URLSearchParams(
-        Object.entries(params).filter(([, v]) => v !== '' && v != null)
-      ).toString();
-      return request(`/menu${qs ? `?${qs}` : ''}`);
-    },
+    // Menu
+    menu: (params = {}) => request(`/menu${qs(params)}`),
+    dish: (idOrSlug) => request(`/menu/${encodeURIComponent(idOrSlug)}`),
     coupons: () => request('/menu/coupons', { auth: false }),
     quote: (items, coupon) => request('/menu/quote', { method: 'POST', body: { items, coupon } }),
     toggleFavorite: (id) => request(`/menu/${id}/favorite`, { method: 'POST' }),
+    review: (id, data) => request(`/menu/${id}/reviews`, { method: 'POST', body: data }),
 
-    getCart: (coupon) => request(`/cart${coupon ? `?coupon=${encodeURIComponent(coupon)}` : ''}`),
+    // Cart
+    getCart: (coupon) => request(`/cart${qs({ coupon })}`),
     addToCart: (item_id, quantity, coupon) =>
       request('/cart/items', { method: 'POST', body: { item_id, quantity, coupon } }),
     setCartQty: (item_id, quantity, coupon) =>
@@ -74,16 +85,48 @@
     clearCart: () => request('/cart', { method: 'DELETE' }),
     mergeCart: (items, coupon) => request('/cart/merge', { method: 'POST', body: { items, coupon } }),
 
-    placeOrder: (data) => request('/orders', { method: 'POST', body: data }),
-    orders: (limit = 20) => request(`/orders?limit=${limit}`),
+    // Orders
+    placeOrder: (data, idempotencyKey) =>
+      request('/orders', {
+        method: 'POST',
+        body: data,
+        headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {},
+      }),
+    orders: (params = {}) => request(`/orders${qs(params)}`),
     order: (id) => request(`/orders/${id}`),
     cancelOrder: (id) => request(`/orders/${id}/cancel`, { method: 'POST' }),
     reorder: (id) => request(`/orders/${id}/reorder`, { method: 'POST' }),
 
-    adminOrders: (status = 'all') => request(`/admin/orders?status=${status}`),
+    // Addresses
+    addresses: () => request('/addresses'),
+    addAddress: (data) => request('/addresses', { method: 'POST', body: data }),
+    updateAddress: (id, data) => request(`/addresses/${id}`, { method: 'PATCH', body: data }),
+    defaultAddress: (id) => request(`/addresses/${id}/default`, { method: 'POST' }),
+    deleteAddress: (id) => request(`/addresses/${id}`, { method: 'DELETE' }),
+
+    // AI
+    recommendations: (params = {}) => request(`/ai/recommendations${qs(params)}`),
+    similar: (id, limit = 4) => request(`/ai/similar/${id}${qs({ limit })}`),
+    askAssistant: (question) => request('/ai/assistant', { method: 'POST', body: { question } }),
+    trackEvent: (item_id, action = 'view') =>
+      request('/ai/events', { method: 'POST', body: { item_id, action } }).catch(() => {}),
+    aiStatus: () => request('/ai/status', { auth: false }),
+    analytics: () => request('/ai/analytics'),
+    forecast: (horizon = 7) => request(`/ai/forecast${qs({ horizon })}`),
+    trends: () => request('/ai/trends'),
+
+    // Payments
+    paymentIntent: (order_id) => request('/payments/intent', { method: 'POST', body: { order_id } }),
+    paymentStatus: (orderId) => request(`/payments/status/${orderId}`),
+
+    // Admin
+    adminOrders: (status = 'all') => request(`/admin/orders${qs({ status })}`),
     adminStats: () => request('/admin/stats'),
+    adminMenu: () => request('/admin/menu'),
     adminSetStatus: (id, status) => request(`/admin/orders/${id}`, { method: 'PATCH', body: { status } }),
     adminSetMenu: (id, patch) => request(`/admin/menu/${id}`, { method: 'PATCH', body: patch }),
+    adminCoupons: () => request('/admin/coupons'),
+    adminSetCoupon: (code, patch) => request(`/admin/coupons/${code}`, { method: 'PATCH', body: patch }),
   };
 
   /* ---------------------------------------------------------------- */
@@ -95,15 +138,9 @@
   const session = {
     user: null,
 
-    get token() {
-      return localStorage.getItem(TOKEN_KEY);
-    },
-    get isLoggedIn() {
-      return Boolean(this.user);
-    },
-    get isAdmin() {
-      return this.user?.role === 'admin';
-    },
+    get token() { return localStorage.getItem(TOKEN_KEY); },
+    get isLoggedIn() { return Boolean(this.user); },
+    get isAdmin() { return this.user?.role === 'admin'; },
 
     save(token, user) {
       localStorage.setItem(TOKEN_KEY, token);
@@ -119,7 +156,7 @@
 
     /** Restores the signed-in user on page load; resolves to the user or null. */
     async restore() {
-      if (!this.token) return null;
+      if (!this.token) { this.emit(); return null; }
       try {
         const { user } = await api.me();
         this.user = user;
@@ -131,13 +168,8 @@
       return this.user;
     },
 
-    onChange(fn) {
-      listeners.add(fn);
-      return () => listeners.delete(fn);
-    },
-    emit() {
-      listeners.forEach((fn) => fn(this.user));
-    },
+    onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
+    emit() { listeners.forEach((fn) => fn(this.user)); },
   };
 
   /* ---------------------------------------------------------------- */
@@ -153,21 +185,20 @@
         return [];
       }
     },
-    write(lines) {
-      localStorage.setItem(CART_KEY, JSON.stringify(lines));
-    },
-    clear() {
-      localStorage.removeItem(CART_KEY);
-    },
+    write(lines) { localStorage.setItem(CART_KEY, JSON.stringify(lines)); },
+    clear() { localStorage.removeItem(CART_KEY); },
+  };
+
+  const EMPTY_CART = {
+    items: [], count: 0, subtotal: 0, discount: 0,
+    delivery_fee: 0, small_order_fee: 0, tax: 0, total: 0, coupon: null,
   };
 
   const cart = {
-    /** Latest server-priced snapshot: { items, count, subtotal, total, ... } */
-    state: { items: [], count: 0, subtotal: 0, discount: 0, delivery_fee: 0, tax: 0, total: 0, coupon: null },
+    /** Latest server-priced snapshot. Never computed on the client. */
+    state: { ...EMPTY_CART },
 
-    get coupon() {
-      return localStorage.getItem(COUPON_KEY) || '';
-    },
+    get coupon() { return localStorage.getItem(COUPON_KEY) || ''; },
     set coupon(code) {
       if (code) localStorage.setItem(COUPON_KEY, code.toUpperCase());
       else localStorage.removeItem(COUPON_KEY);
@@ -232,18 +263,26 @@
       }
       return this.state;
     },
+
+    /** How many of one dish are currently in the basket. */
+    quantityOf(itemId) {
+      return this.state.items.find((l) => l.item_id === itemId)?.quantity || 0;
+    },
   };
 
   /* ---------------------------------------------------------------- */
-  /* Small shared helpers                                              */
+  /* Formatting and small shared helpers                               */
   /* ---------------------------------------------------------------- */
 
   const money = (rupees) => `₹${Number(rupees || 0).toLocaleString('en-IN')}`;
 
   const escapeHtml = (str) =>
-    String(str).replace(/[&<>"']/g, (c) =>
+    String(str ?? '').replace(/[&<>"']/g, (c) =>
       ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])
     );
+
+  /** `images/dishes/x.jpg` → a fallback-safe <img> attribute string. */
+  const imgFallback = "this.onerror=null;this.src='images/placeholder.svg'";
 
   function timeAgo(sqliteUtc) {
     const then = Date.parse(`${String(sqliteUtc).replace(' ', 'T')}Z`);
@@ -253,6 +292,8 @@
     if (mins < 60) return `${mins} min ago`;
     const hours = Math.round(mins / 60);
     if (hours < 24) return `${hours} hr ago`;
+    const days = Math.round(hours / 24);
+    if (days < 7) return `${days} day${days > 1 ? 's' : ''} ago`;
     return new Date(then).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
   }
 
@@ -264,7 +305,10 @@
     });
   }
 
-  /** Bottom-right toast. `type` is 'info' | 'success' | 'error'. */
+  const spiceLabel = (level) => ['Mild', 'Gentle heat', 'Spicy', 'Very spicy'][level] || 'Mild';
+  const stars = (rating) => '★'.repeat(Math.round(rating)) + '☆'.repeat(5 - Math.round(rating));
+
+  /** Bottom-centre toast. `type` is 'info' | 'success' | 'error'. */
   function toast(message, type = 'info') {
     let host = document.querySelector('.toast-host');
     if (!host) {
@@ -274,13 +318,16 @@
       host.setAttribute('aria-live', 'polite');
       document.body.appendChild(host);
     }
+
     const el = document.createElement('div');
     el.className = `toast toast--${type}`;
     el.textContent = message;
     host.appendChild(el);
+
     setTimeout(() => {
       el.classList.add('toast--out');
       el.addEventListener('transitionend', () => el.remove(), { once: true });
+      setTimeout(() => el.remove(), 600);
     }, 3200);
   }
 
@@ -306,5 +353,22 @@
     },
   };
 
-  window.QB = { api, session, cart, guestCart: guest, money, escapeHtml, timeAgo, formatDateTime, toast, theme };
+  /** Debounces `fn` so typing does not fire a request per keystroke. */
+  function debounce(fn, wait = 220) {
+    let timer;
+    return (...args) => {
+      clearTimeout(timer);
+      timer = setTimeout(() => fn(...args), wait);
+    };
+  }
+
+  /** A random key so a double-submitted checkout cannot create two orders. */
+  const newIdempotencyKey = () =>
+    (crypto.randomUUID ? crypto.randomUUID() : `k-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+
+  window.QB = {
+    api, session, cart, guestCart: guest,
+    money, escapeHtml, imgFallback, timeAgo, formatDateTime, spiceLabel, stars,
+    toast, theme, debounce, newIdempotencyKey,
+  };
 })();

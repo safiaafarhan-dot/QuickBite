@@ -3,22 +3,24 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex" />
+  <meta name="theme-color" content="#e4432d" />
   <title>Kitchen dashboard — QuickBite</title>
   <link rel="icon" href="images/logo.png" />
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
 
-<header class="site-header">
+<header class="site-header" id="siteHeader">
   <div class="shell header-row">
-    <a class="brand" href="/">
-      <img src="images/logo.png" alt="" width="40" height="40" /><span>QuickBite</span>
-    </a>
+    <a class="brand" href="/"><img src="images/logo.png" alt="" width="38" height="38" /><span>QuickBite</span></a>
+
     <nav class="main-nav" aria-label="Main">
       <a href="index.html#menu">Menu</a>
       <a href="orders.html">My orders</a>
-      <a href="admin.html">Admin</a>
+      <a href="admin.html" aria-current="page">Kitchen</a>
     </nav>
+
     <div class="header-actions">
       <button class="icon-btn" data-theme-toggle aria-label="Switch theme">🌙</button>
       <span class="order-when" id="whoami"></span>
@@ -29,19 +31,26 @@
 <main class="shell" id="adminMain" hidden>
   <div class="page-head">
     <h1>Kitchen dashboard</h1>
-    <p>Live orders, revenue and menu availability. Refreshes every 10 seconds.</p>
+    <p>Live orders, revenue and stock. Refreshes every 10 seconds.</p>
   </div>
 
   <div class="stat-grid" id="statGrid"></div>
 
-  <div class="admin-grid">
+  <div class="admin-tabs" role="tablist">
+    <button class="chip is-active" data-view="operations" role="tab" aria-selected="true">Operations</button>
+    <button class="chip" data-view="analytics" role="tab" aria-selected="false">Analytics &amp; forecast</button>
+  </div>
+
+  <!-- ============================== Operations -->
+  <div class="admin-grid" id="viewOperations">
     <section class="panel">
       <header class="panel-head">
         <h2>Orders</h2>
-        <select class="status-select" id="orderFilter">
+        <select class="select" id="orderFilter" aria-label="Filter orders by status">
           <option value="live">Live orders</option>
           <option value="all">All orders</option>
           <option value="placed">Placed</option>
+          <option value="confirmed">Confirmed</option>
           <option value="preparing">Preparing</option>
           <option value="out_for_delivery">Out for delivery</option>
           <option value="delivered">Delivered</option>
@@ -51,15 +60,66 @@
       <div class="panel-body" id="adminOrders"></div>
     </section>
 
-    <div style="display:grid; gap:24px;">
+    <div class="admin-col">
       <section class="panel">
         <header class="panel-head"><h2>Top sellers</h2></header>
         <div class="panel-body"><ul class="top-items" id="topItems"></ul></div>
       </section>
 
       <section class="panel">
-        <header class="panel-head"><h2>Menu &amp; pricing</h2></header>
+        <header class="panel-head">
+          <h2>Low stock</h2>
+          <span class="order-when">10 or fewer left</span>
+        </header>
+        <div class="panel-body"><ul class="top-items" id="lowStock"></ul></div>
+      </section>
+
+      <section class="panel">
+        <header class="panel-head">
+          <h2>Menu, price &amp; stock</h2>
+          <button class="btn btn--quiet btn--sm" id="refreshMenu">Refresh</button>
+        </header>
         <div class="panel-body" id="menuAdmin"></div>
+      </section>
+    </div>
+  </div>
+
+  <!-- ============================== Analytics -->
+  <div class="admin-grid" id="viewAnalytics" hidden>
+    <div class="admin-col">
+      <section class="panel">
+        <header class="panel-head">
+          <h2>Orders by hour</h2>
+          <span class="order-when" id="peakHour"></span>
+        </header>
+        <div class="panel-body"><div class="chart" id="hourChart"></div></div>
+      </section>
+
+      <section class="panel">
+        <header class="panel-head"><h2>Daily orders</h2></header>
+        <div class="panel-body"><div class="chart" id="dailyChart"></div></div>
+      </section>
+
+      <section class="panel">
+        <header class="panel-head"><h2>Revenue by category</h2></header>
+        <div class="panel-body"><ul class="top-items" id="categoryMix"></ul></div>
+      </section>
+    </div>
+
+    <div class="admin-col">
+      <section class="panel">
+        <header class="panel-head"><h2>Demand forecast</h2></header>
+        <div class="panel-body" id="forecastPanel"></div>
+      </section>
+
+      <section class="panel">
+        <header class="panel-head"><h2>Week on week</h2></header>
+        <div class="panel-body" id="trendsPanel"></div>
+      </section>
+
+      <section class="panel">
+        <header class="panel-head"><h2>Coupon usage</h2></header>
+        <div class="panel-body"><ul class="top-items" id="couponUsage"></ul></div>
       </section>
     </div>
   </div>
@@ -67,6 +127,7 @@
 
 <div class="shell" id="adminGate">
   <div class="gate">
+    <p class="state-emoji">🍳</p>
     <h2 id="gateTitle">Checking your access…</h2>
     <p id="gateText">One moment.</p>
     <a class="btn btn--primary" href="index.html" id="gateLink" hidden>Back to the menu</a>
