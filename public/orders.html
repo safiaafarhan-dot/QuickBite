@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>My orders — QuickBite</title>
+  <link rel="icon" href="images/logo.png" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+<header class="site-header">
+  <div class="shell header-row">
+    <a class="brand" href="/">
+      <img src="images/logo.png" alt="" width="40" height="40" /><span>QuickBite</span>
+    </a>
+    <nav class="main-nav" aria-label="Main">
+      <a href="index.html#menu">Menu</a>
+      <a href="orders.html">My orders</a>
+      <a href="admin.html" class="admin-link" hidden>Admin</a>
+    </nav>
+    <div class="header-actions">
+      <button class="icon-btn" data-theme-toggle aria-label="Switch theme">🌙</button>
+      <a class="btn btn--primary btn--sm" href="index.html#menu">Order again</a>
+    </div>
+  </div>
+</header>
+
+<main class="shell">
+  <div class="page-head">
+    <h1>My orders</h1>
+    <p id="ordersSubtitle">Live tracking updates automatically every few seconds.</p>
+  </div>
+
+  <div class="orders-list" id="ordersList"></div>
+</main>
+
+<footer class="site-footer">
+  <div class="shell footer-row">
+    <p class="copyright">© 2025 QuickBite. All rights reserved.</p>
+  </div>
+</footer>
+
+<script src="js/api.js"></script>
+<script src="js/orders.js"></script>
+</body>
+</html>

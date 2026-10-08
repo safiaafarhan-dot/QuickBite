@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" width="400" height="300" role="img" aria-label="Dish photo coming soon">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffe8d6"/>
+      <stop offset="100%" stop-color="#ffd0b5"/>
+    </linearGradient>
+  </defs>
+  <rect width="400" height="300" fill="url(#g)"/>
+  <circle cx="200" cy="140" r="62" fill="none" stroke="#e2672f" stroke-width="7" opacity=".85"/>
+  <circle cx="200" cy="140" r="42" fill="none" stroke="#e2672f" stroke-width="4" opacity=".45"/>
+  <path d="M118 96v38a14 14 0 0 0 14 14h2v56" fill="none" stroke="#e2672f" stroke-width="7" stroke-linecap="round"/>
+  <path d="M276 96c12 0 20 16 20 34s-8 26-20 26v48" fill="none" stroke="#e2672f" stroke-width="7" stroke-linecap="round"/>
+  <text x="200" y="250" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="19" fill="#b4502a">Photo coming soon</text>
+</svg>

@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>QuickBite - Food Delivery</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <header>
+    <div class="container header-container">
+      <a href="#" class="logo">QuickBite</a>
+      <nav>
+        <ul class="nav-links">
+          <li><a href="#home">Home</a></li>
+          <li><a href="#menu">Menu</a></li>
+          <li><a href="#order">Order</a></li>
+        </ul>
+      </nav>
+      <button id="cart-btn" aria-label="Open cart">
+        🛒 <span id="cart-count">0</span>
+      </button>
+    </div>
+  </header>
+
+  <main>
+    <section id="home" class="hero-section">
+      <h1>Welcome to QuickBite</h1>
+      <p>Your favorite meals delivered fast!</p>
+    </section>
+
+    <section class="menu" id="menu">
+  <h2>Our Menu</h2>
+  <div class="menu-items">
+    <div class="menu-card" data-name="Classic Margherita Pizza" data-price="450" data-category="veg popular">
+  <img src="pizza.jpeg" alt="Classic Margherita Pizza" />
+  <h3>Classic Margherita Pizza</h3>
+  <p>Fresh tomato, mozzarella, and basil</p>
+  <div class="quantity-selector">
+    <button class="qty-btn minus">-</button>
+    <input type="number" class="qty-input" min="1" value="1" />
+    <button class="qty-btn plus">+</button>
+  </div>
+  <button class="add-to-cart-btn">Add to Cart - ₹450</button>
+</div>
+
+ <div class="menu-card" data-name="Spaghetti Carbonara" data-price="520" data-category="nonveg"></div>
+  <img src="Spaghetti Carbonara.jpeg" alt="Spaghetti Carbonara" />
+  <h3>Spaghetti Carbonara</h3>
+  <p>Creamy sauce with pancetta and parmesan</p>
+  <div class="quantity-selector">
+    <button class="qty-btn minus">-</button>
+    <input type="number" class="qty-input" min="1" value="1" />
+    <button class="qty-btn plus">+</button>
+  </div>
+  <button class="add-to-cart-btn">Add to Cart - ₹520</button>
+</div>
+
+<div class="menu-card" data-name="Penne Arrabbiata" data-price="380" data-category="veg">
+  <img src="pasta.jpeg" alt="Penne Arrabbiata" />
+  <h3>Penne Arrabbiata</h3>
+  <p>Spicy tomato sauce with garlic and chili</p>
+  <div class="quantity-selector">
+    <button class="qty-btn minus">-</button>
+    <input type="number" class="qty-input" min="1" value="1" />
+    <button class="qty-btn plus">+</button>
+  </div>
+  <button class="add-to-cart-btn">Add to Cart - ₹380</button>
+</div>
+
+<div class="menu-card" data-name="Veggie Burger" data-price="400" data-category="veg popular">
+  <img src="burger.webp" alt="Veggie Burger" />
+  <h3>Veggie Burger</h3>
+  <p>Grilled veggies with special sauce</p>
+  <div class="quantity-selector">
+    <button class="qty-btn minus">-</button>
+    <input type="number" class="qty-input" min="1" value="1" />
+    <button class="qty-btn plus">+</button>
+  </div>
+  <button class="add-to-cart-btn">Add to Cart - ₹400</button>
+</div>
+<div class="menu-card" data-name="Chicken Biryani" data-price="720" data-category="nonveg popular">
+  <img src="biriyani.jpg" alt="Chicken Biryani" />
+  <h3>Chicken Biryani</h3>
+  <p>Spiced chicken layered with fragrant rice</p>
+  <div class="quantity-selector">
+    <button class="qty-btn minus">-</button>
+    <input type="number" class="qty-input" min="1" value="1" />
+    <button class="qty-btn plus">+</button>
+  </div>
+  <button class="add-to-cart-btn">Add to Cart - ₹720</button>
+</div>
+
+   <div class="menu-card" data-name="Ice Cream" data-price="310" data-category="dataset">
+  <img src="icecream.jpeg" alt="Ice Cream" />
+  <h3>Ice Cream</h3>
+  <p>Rich and creamy delight</p>
+  <div class="quantity-selector">
+    <button class="qty-btn minus">-</button>
+    <input type="number" class="qty-input" min="1" value="1" />
+    <button class="qty-btn plus">+</button>
+  </div>
+  <button class="add-to-cart-btn">Add to Cart - ₹310</button>
+</div>
+</section>
+
+  </main>
+
+  <!-- Cart Modal -->
+  <div id="cart-modal" class="cart-modal hidden" role="dialog" aria-modal="true" aria-labelledby="cart-title">
+    <div class="cart-content">
+      <button id="close-cart" aria-label="Close cart">✖</button>
+      <h id="cart-title">Your Cart</h>
+      <ul id="cart-list"></ul>
+      <div id="cart-total"></div>
+      <button id="checkout-btn">Checkout</button>
+    </div>
+  </div>
+
+  <div id="overlay" class="overlay hidden"></div>
+
+  <footer>
+    <p>&copy; 2025 QuickBite. All rights reserved.</p>
+  </footer>
+
+  <script src="script.js"></script>
+  <!-- Cart Sidebar -->
+<div id="cart-sidebar" class="cart-sidebar">
+  <h3>Your Cart</h3>
+  <ul id="cart-items"></ul>
+  <p>Total: ₹<span id="cart-total">0</span></p>
+  <button onclick="checkout()">Checkout</button>
+</div>
+
+<!-- Overlay to close cart -->
+<div id="overlay" class="overlay" onclick="toggleCart()"></div>
+<script>
+  // Quantity + and - buttons
+  document.querySelectorAll('.menu-card').forEach(card => {
+    const minus = card.querySelector('.minus');
+    const plus = card.querySelector('.plus');
+    const input = card.querySelector('.qty-input');
+
+    minus.addEventListener('click', () => {
+      if (input.value > 1) input.value--;
+    });
+
+    plus.addEventListener('click', () => {
+      input.value++;
+    });
+
+    card.querySelector('.add-to-cart-btn').addEventListener('click', () => {
+      const name = card.dataset.name;
+      const price = parseInt(card.dataset.price);
+      const qty = parseInt(input.value);
+      for (let i = 0; i < qty; i++) {
+        addToCart(name, price);
+      }
+    });
+  });
+</script>
+<script src="script.js" defer></script>
+<script>
+  window.onload = () => {
+    document.body.classList.add("fade-page");
+  };
+</script>
+
+</body>
+</html>
