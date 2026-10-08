@@ -45,8 +45,20 @@ function passwordProblem(password) {
   return null;
 }
 
+/** Credentials must arrive as strings; arrays and objects are rejected, not coerced. */
+function badCredentialTypes(body) {
+  for (const field of ['email', 'password']) {
+    if (body[field] !== undefined && typeof body[field] !== 'string') return true;
+  }
+  return false;
+}
+
 router.post('/register', credentialLimiter, async (req, res, next) => {
   try {
+    if (badCredentialTypes(req.body)) {
+      return res.status(400).json({ error: 'Email and password must be text.' });
+    }
+
     const name = cleanText(req.body.name, 80);
     const email = cleanText(req.body.email, 160).toLowerCase();
     const password = String(req.body.password || '');
@@ -77,6 +89,10 @@ router.post('/register', credentialLimiter, async (req, res, next) => {
 
 router.post('/login', credentialLimiter, async (req, res, next) => {
   try {
+    if (badCredentialTypes(req.body)) {
+      return res.status(401).json({ error: 'Email or password is incorrect.' });
+    }
+
     const email = cleanText(req.body.email, 160).toLowerCase();
     const password = String(req.body.password || '');
 
