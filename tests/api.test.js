@@ -398,6 +398,48 @@ test('the public coupon list hides expired and exhausted codes', async () => {
   assert.ok(!codes.includes('EXPIRED5'), 'an expired coupon is not advertised');
 });
 
+test('recent reviews are public, capped, and only ever real ones', async () => {
+  /*
+   * Added for the reviews section on the home page. Everything it
+   * returns was already public one dish at a time through
+   * GET /api/menu/:slug — this is the same data, across dishes.
+   */
+  const { body, status } = await call('GET', '/api/menu/reviews/recent');
+  assert.equal(status, 200, 'the endpoint is public');
+  assert.ok(Array.isArray(body.reviews));
+
+  for (const r of body.reviews) {
+    assert.ok(r.rating >= 1 && r.rating <= 5, `rating out of range: ${r.rating}`);
+    assert.notEqual(r.comment, '', 'a blank comment has nothing to show');
+    assert.ok(r.author, 'every review names its author');
+    assert.ok(r.item_name && r.item_slug, 'every review names the dish it is about');
+  }
+
+  // The cap holds in both directions, so a caller cannot ask for the lot.
+  const few = await call('GET', '/api/menu/reviews/recent?limit=2');
+  assert.ok(few.body.reviews.length <= 2);
+
+  const greedy = await call('GET', '/api/menu/reviews/recent?limit=5000');
+  assert.ok(greedy.body.reviews.length <= 24, 'the limit is capped server-side');
+
+  const nonsense = await call('GET', '/api/menu/reviews/recent?limit=abc');
+  assert.equal(nonsense.status, 200, 'a junk limit falls back rather than erroring');
+});
+
+test('adding the reviews route did not shadow a dish slug', async () => {
+  /*
+   * `/:idOrSlug` sits directly below the new route. A dish called
+   * "reviews" could never resolve, but more importantly every existing
+   * slug still has to.
+   */
+  const { status, body } = await call('GET', '/api/menu/margherita-pizza');
+  assert.equal(status, 200);
+  assert.equal(body.item.slug, 'margherita-pizza');
+
+  const coupons = await call('GET', '/api/menu/coupons');
+  assert.equal(coupons.status, 200, 'the sibling routes still resolve');
+});
+
 /* ================================================================== */
 /* Checkout                                                            */
 /* ================================================================== */

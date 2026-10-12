@@ -138,6 +138,23 @@
     el.resetFilters.hidden = !changed;
   }
 
+  /*
+   * Hands the menu payload to anything else on the page that needs it —
+   * the flavour categories and the featured dish in scenes.js.
+   *
+   * An event plus a cached copy, because a listener that attaches after
+   * the menu has already loaded would otherwise wait forever. Only the
+   * unfiltered payload is published: a filtered one would quietly shrink
+   * the category counts every time a visitor narrowed the menu.
+   */
+  function publishMenu(data) {
+    const unfiltered = Object.keys(DEFAULTS).every((k) => filters[k] === DEFAULTS[k]);
+    if (!unfiltered) return;
+
+    window.__qbMenu = data;
+    window.dispatchEvent(new CustomEvent('qb:menu', { detail: data }));
+  }
+
   function renderCategoryChips(categories) {
     if (el.categoryChips.dataset.ready === '1') return;
 
@@ -162,6 +179,7 @@
       menuItems = data.items;
       renderCategoryChips(data.categories);
       renderMenu();
+      publishMenu(data);
 
       if (data.price_range && el.priceRange.dataset.ready !== '1') {
         priceCeiling = data.price_range.max;
@@ -197,7 +215,7 @@
     filters.q = el.heroSearch.value.trim();
     el.searchInput.value = filters.q;
     loadMenu({ showSkeleton: true });
-    document.getElementById('menu').scrollIntoView({ behavior: 'smooth' });
+    window.QB.scrollToSection('#menu');
   });
 
   el.quickChips?.addEventListener('click', (e) => {
@@ -214,7 +232,7 @@
 
     syncFilterControls();
     loadMenu({ showSkeleton: true });
-    document.getElementById('menu').scrollIntoView({ behavior: 'smooth' });
+    window.QB.scrollToSection('#menu');
   });
 
   el.sortSelect?.addEventListener('change', (e) => {
@@ -282,7 +300,12 @@
 
   /* ---- Menu interactions ------------------------------------------ */
 
-  el.menuGrid?.addEventListener('click', async (e) => {
+  /*
+   * Named, so the featured-dish showcase in Scene 3 can reuse exactly
+   * these handlers rather than growing its own copy of add-to-cart,
+   * quantity stepping and the detail modal.
+   */
+  async function onCardClick(e) {
     if (e.target.id === 'clearFromEmpty') return resetFilters();
     if (e.target.id === 'retryMenu') return loadMenu({ showSkeleton: true });
 
@@ -302,17 +325,22 @@
 
     const addBtn = e.target.closest('[data-add]');
     if (addBtn) return addToCart(addBtn);
-  });
+  }
 
   // Keyboard support for the image "button".
-  el.menuGrid?.addEventListener('keydown', (e) => {
+  function onCardKeydown(e) {
     if (e.key !== 'Enter' && e.key !== ' ') return;
     const trigger = e.target.closest('[data-open-detail]');
     if (trigger) {
       e.preventDefault();
       openDetail(trigger.dataset.openDetail);
     }
-  });
+  }
+
+  for (const host of [el.menuGrid, document.getElementById('featured')]) {
+    host?.addEventListener('click', onCardClick);
+    host?.addEventListener('keydown', onCardKeydown);
+  }
 
   async function toggleFavourite(btn) {
     if (!session.isLoggedIn) return openAuth('login', 'Sign in to save your favourites.');
@@ -394,6 +422,10 @@
             <span class="price">${money(item.price)}</span>
           </div>
         </article>`).join('');
+
+      // The rail arrives long after first paint; the scroll choreography
+      // has no way to know its cards exist without being told.
+      window.dispatchEvent(new CustomEvent('qb:picks'));
     } catch {
       document.getElementById('picks').hidden = true;
     }
@@ -618,7 +650,7 @@
   el.cartBody?.addEventListener('click', async (e) => {
     if (e.target.id === 'browseFromCart') {
       closeDrawer();
-      document.getElementById('menu')?.scrollIntoView({ behavior: 'smooth' });
+      window.QB.scrollToSection('#menu');
       return;
     }
 
@@ -1194,11 +1226,31 @@
       const { coupons } = await api.coupons();
       if (coupons.length === 0) { el.couponStrip.hidden = true; return; }
 
-      el.couponStrip.innerHTML = coupons.map((c) => `
-        <button class="coupon-pill" data-coupon="${escapeHtml(c.code)}" title="Tap to apply">
-          <code>${escapeHtml(c.code)}</code>
-          <span>${escapeHtml(c.description)}</span>
-        </button>`).join('');
+      /*
+       * Scene 5 shows these as full cards rather than pills, including
+       * the two terms the API already returns and the old markup threw
+       * away: the minimum spend and whether it is once per account.
+       * `data-coupon` is unchanged, so the existing apply handler keeps
+       * working without knowing anything about the new layout.
+       */
+      el.couponStrip.innerHTML = coupons.map((c) => {
+        const terms = [];
+        if (c.min_subtotal > 0) terms.push(`On orders over ${money(c.min_subtotal)}`);
+        if (c.per_user_limit === 1) terms.push('Once per account');
+
+        return `
+          <button class="offer" data-coupon="${escapeHtml(c.code)}">
+            <span class="offer-face">
+              <code class="offer-code">${escapeHtml(c.code)}</code>
+              <span class="offer-desc">${escapeHtml(c.description)}</span>
+              ${terms.length ? `<span class="offer-terms">${terms.map(escapeHtml).join(' · ')}</span>` : ''}
+              <span class="offer-apply">Tap to apply</span>
+            </span>
+          </button>`;
+      }).join('');
+
+      el.couponStrip.setAttribute('aria-busy', 'false');
+      window.dispatchEvent(new CustomEvent('qb:coupons'));
     } catch {
       el.couponStrip.hidden = true;
     }

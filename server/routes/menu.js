@@ -130,6 +130,41 @@ router.get('/', (req, res) => {
   });
 });
 
+/**
+ * GET /api/menu/reviews/recent — the latest reviews across the whole menu.
+ *
+ * Added for the reviews section on the home page, which needs opinions
+ * from several dishes at once. Every field here was already public: the
+ * dish detail endpoint below returns exactly the same columns, author
+ * name included, for one dish at a time. The alternative was thirty
+ * requests to build one carousel.
+ *
+ * Read-only, unauthenticated, and capped. Reviews can only be written by
+ * someone who was actually delivered the dish, so there is nothing here
+ * that was not earned by a real order.
+ */
+router.get('/reviews/recent', (req, res) => {
+  const limit = Math.min(Math.max(toPositiveInt(req.query.limit) || 12, 1), 24);
+
+  const reviews = db
+    .prepare(`
+      SELECT r.rating, r.comment, r.created_at,
+             u.name  AS author,
+             m.name  AS item_name,
+             m.slug  AS item_slug,
+             m.image AS item_image
+      FROM reviews r
+      JOIN users u ON u.id = r.user_id
+      JOIN menu_items m ON m.id = r.item_id
+      WHERE r.comment <> '' AND m.is_available = 1
+      ORDER BY r.id DESC
+      LIMIT ?
+    `)
+    .all(limit);
+
+  res.json({ reviews });
+});
+
 router.get('/coupons', (_req, res) => {
   const coupons = db
     .prepare(`

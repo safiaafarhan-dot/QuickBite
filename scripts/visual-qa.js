@@ -113,6 +113,28 @@ const shot = async (page, name) => {
   console.log(`  📷 ${name}.png`);
 };
 
+/**
+ * Waits for the cinematic 3D hero to finish its opening rise.
+ *
+ * Without this the hero screenshots are non-deterministic: `networkidle`
+ * fires long before the burger has risen into place, so a run can
+ * capture it mid-flight and the reviewer ends up judging a frame the
+ * visitor sees for about a second. Pages without the scene — and
+ * browsers that decline it — fall straight through.
+ */
+async function settleScene(page) {
+  const live = await page
+    .waitForFunction(() => !!window.__qbHero, null, { timeout: 4000 })
+    .then(() => true)
+    .catch(() => false);
+
+  if (!live) return false;
+
+  await page.waitForFunction(() => window.__qbHero.intro() > 0.999, null, { timeout: 10000 });
+  await page.waitForTimeout(250);
+  return true;
+}
+
 async function main() {
   fs.rmSync(OUT, { recursive: true, force: true });
   fs.mkdirSync(OUT, { recursive: true });
@@ -140,6 +162,7 @@ async function main() {
     await checkOverflow(page, `${vp.name}/home`);
     await checkImages(page, `${vp.name}/home`);
     await checkClipping(page, `${vp.name}/home`);
+    await settleScene(page);
     await shot(page, `${vp.name}-01-home-hero`);
 
     // Menu grid

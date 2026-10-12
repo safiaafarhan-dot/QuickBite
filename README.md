@@ -145,6 +145,168 @@ endpoints are misbehaving.
 
 ---
 
+## The cinematic act
+
+The home page opens on three scroll-driven scenes. Every animation in
+them is **scroll-linked, not scroll-triggered** — each transform is a
+continuous function of scroll offset, so everything scrubs backwards
+exactly as it plays forwards.
+
+**Scene 1 — the burger.** A modelled burger rises into place, turns
+toward the camera, separates into its ingredients, puts itself back
+together, then descends and leaves to the lower left.
+
+**Scene 2 — explore flavours.** Category cards rise, un-tilt and settle
+as the section crosses the viewport, and tilt in 3D under the pointer.
+Every card is a real category from the API with its real dish count, its
+real lowest price and a photo of a real dish from it; clicking one drives
+the menu's own category filter rather than a second copy of it.
+
+**Scene 3 — the exploded showcase.** A pinned section in which the
+modelled pizza comes apart into crust, sauce, mozzarella and basil,
+holds, and reassembles — all scrubbed, so scrolling back up puts it
+together again. Beside it, a glass panel names the highest-rated pizza
+actually on the menu with its real description, price, rating, prep time
+and photograph. Its buttons are wired to the same cart and detail
+handlers the menu grid uses, so they genuinely work.
+
+The section is pinned because the explode only reads if the object holds
+still while it comes apart. Unpinned, the pizza drifts up the screen at
+the same time and the two motions cancel out. The pin lasts a little
+over one viewport, so it never feels like the page has stopped
+responding.
+
+**The rest of the page** gets the same language, dialled down and
+section by section. "Picked for you" lifts gently, because it is a
+personal shelf rather than a spectacle. "How it works" has its five
+stages climb in order, each from further back than the last, so it reads
+as a journey — and they are the five statuses an order really moves
+through, read from the server's own lifecycle rather than written out
+again here. The menu grid deliberately gets **nothing**: it is thirty
+cards on a utility surface people scan and filter, and the one screen
+that needs to feel instant should not feel staged. Restraint there is
+the design decision, not an omission.
+
+### Ascending and descending
+
+The motion that defines the act is vertical travel through real depth,
+not translation on a flat plane. Measured across one pass:
+
+| | |
+| --- | --- |
+| Burger | rises from below the frame, turns 4.4 radians, moves from z −3.4 to +1.2 and back to −2.6, separates into eight layers and reassembles, then descends and exits lower-left |
+| Pizza | rises from below the lower-right, climbs 3.4 frame-heights, tips from almost edge-on to nearly flat, then settles **back down** into its showcase position |
+| Pizza layers | spread from 0.14 to 1.71 world units apart and close again |
+| Scene 2 cards | arrive from translateZ −140 to −440 px — genuinely different distances, not scaled imitations — then drift up, down, forward and back at depth-derived rates |
+| Journey legs | five stages climb in sequence from z −220, −330, −440, −550, −660 |
+
+None of it is monotonic, and none of it is a fade. Every value is a
+continuous function of scroll offset, so all of it runs backwards.
+
+### The handoff
+
+The burger's act ends where Scene 2 begins, and the pizza's begins while
+the burger is still leaving — so for a moment both are on stage at once.
+The burger exits low and to the left; the modelled pizza rises from low
+and to the right, tips toward the viewer, crosses behind the flavour
+cards, and arrives at Scene 3 where the pin takes over.
+
+Only one pizza is ever visible. The dish's photograph appears full-size
+in Scene 3 on any page without WebGL, and shrinks to a chip inside the
+glass panel when the modelled pizza has the stage. An earlier cut showed
+both at once, and a modelled pizza sat next to a photographed one with
+each undermining the other.
+
+**Three.js for the scenes, GSAP ScrollTrigger for the timelines.** One
+fixed, viewport-sized canvas holds the whole 3D world, with the page
+lifted above it by z-index, so a single object can travel from one
+section into the next without being clipped by any section box.
+
+The 3D is the subject in Scene 1 and the backdrop in Scenes 2 and 3; the
+canvas opacity says so, stepping 1.00 → 0.55 → 0.22 as the act proceeds.
+At full strength the pizza crossing behind the flavour grid burned
+through the cards and through the section's own subtitle.
+
+**The burger is modelled in code**, not downloaded — lathed profiles for
+the buns and discs, a waved annulus for the lettuce, an instanced
+Fibonacci spiral of sesame seeds across the dome. That avoids both the
+megabytes and the licence audit a GLTF model would bring, and the shapes
+are parameterised so a phone can be given a cheaper one.
+
+### What it costs, and who pays it
+
+The bundle is split in two, by what a device can actually use:
+
+| File | Size | Loaded when |
+| --- | --- | --- |
+| `motion.bundle.js` + shared chunk | 114 KB (45 KB gzipped) | motion is welcome — drives the Scene 2 and Scene 3 DOM choreography |
+| `scene.bundle.js` | 548 KB (140 KB gzipped) | the device has a working WebGL context |
+
+A laptop with WebGL disabled gets the full scroll choreography for 114 KB
+and never downloads Three.js to find that out. Splitting also keeps GSAP
+to **one** instance: two copies would each run their own ticker, scroll
+listener and ScrollTrigger registry, so a refresh from one could not
+reach the other's triggers.
+
+| | |
+| --- | --- |
+| Loading | Both are lazy, after first paint. Neither is ever on the critical path |
+| Frame rate | 93–120 fps measured in headless Chrome at 1440×900, 820×1180 and 390×844 on this machine. Not a claim about low-end phones |
+| Draw calls | One scene, ~23 meshes, 3 instanced clouds. No shadow maps; the contact shadow is a gradient sprite |
+| Culling | Each object stops being drawn once it is fully outside the frame — the pizza spends all of Scene 1 below the viewport |
+| Below the act | **Zero** frames rendered. The canvas fades out past Scene 3 and the loop bails before drawing. This is asserted by a test, because an invisible scene looks identical whether or not it is being drawn — and for a while it was being drawn, 145 times in 1.2 seconds |
+| Mobile | Fewer polygons, fewer floating ingredients, device-pixel-ratio capped at 1.25, pointer parallax off |
+
+No `transmission` material anywhere, deliberately: a single non-zero
+`transmission` makes Three.js render the whole scene into a second
+render target every frame.
+
+### When it does not run
+
+All three scenes are **additive**, in two independent layers:
+
+- `js/scenes.js` has no dependencies at all. It renders both scenes from
+  the menu payload and wires every interaction — the category filter, the
+  cart buttons, the pointer tilt. It always runs.
+- `js/cinematic/` adds motion on top, and only then. Its animations start
+  from the resting state and animate *from* an offset, never *to*
+  visibility, so nothing it does is load-bearing for seeing content.
+
+`boot.js` decides how much to load, and the `html.qb-3d` class that
+activates the dark treatment is only added *after* WebGL has produced a
+real frame. The WebGL layer declines, silently and completely, when:
+
+- the visitor prefers reduced motion (and it tears down live if that
+  preference is switched on mid-visit)
+- the device has no usable WebGL context
+- the bundle fails to load, or the scene throws while starting
+- the WebGL context is lost
+
+In every one of those cases the hero keeps its original photo collage —
+still in the markup, as the fallback rather than a replacement — and
+Scenes 2 and 3 render on the ordinary light page, which is what they are
+styled for first. The dark treatment is the override, not the base. All
+three failure paths are tested, including a check that the category
+filter still works with the WebGL bundle blocked.
+
+### Rebuilding it
+
+The bundles and their shared chunk are committed, so a clone runs with no
+build step. After editing `public/js/cinematic/scene.js` or `motion.js`:
+
+```bash
+npm run build:3d      # tree-shake + minify with esbuild
+```
+
+A test asserts the committed output still matches its source, so a
+forgotten rebuild fails the suite rather than shipping silently.
+
+Three.js and GSAP are **devDependencies**. They are bundled into a static
+asset at build time and never loaded by the server, so the runtime
+dependency count is still three.
+
+---
+
 ## Project layout
 
 ```
@@ -168,15 +330,24 @@ QuickBite/
 │   ├── orders.html         Order history, live tracking, ratings
 │   ├── admin.html          Kitchen dashboard
 │   ├── css/style.css       Design system, light + dark
+│   ├── css/cinematic.css   The dark cinematic treatment (scoped to html.qb-3d)
+│   ├── css/scenes.css      Scenes 2 and 3, light page first
 │   ├── js/api.js           API client, session, guest cart (shared)
+│   ├── js/scenes.js        Scenes 2 and 3: content and interaction, no deps
 │   ├── js/{app,orders,admin}.js
+│   ├── js/cinematic/
+│   │   ├── boot.js         Feature-detects, then lazy-loads the right tier
+│   │   ├── scene.js        The WebGL world — burger and pizza — source
+│   │   ├── motion.js       GSAP choreography for the Scene 2/3 DOM — source
+│   │   └── *.bundle.js     Built artefacts, committed (npm run build:3d)
 │   └── images/dishes/      30 photos + CREDITS.md
 ├── scripts/
 │   ├── seed.js             Demo accounts, synthetic history, reviews
 │   ├── visual-qa.js        Screenshot + console/overflow sweep in real Chrome
+│   ├── build-cinematic.js  Tree-shakes and minifies the 3D bundle
 │   ├── migrate.js          Deploy-time migration runner
 │   └── fetch-images.js     Pulls openly-licensed dish photos from Commons
-├── tests/                  140 tests across 7 suites
+├── tests/                  170 tests across 8 suites
 ├── data/                   The SQLite file (git-ignored)
 └── legacy/                 The original prototype, kept for reference
 ```
@@ -265,12 +436,13 @@ total. Replays are ignored. The browser saying "paid" changes nothing.
 ## Testing
 
 ```bash
-npm test                # all 140
+npm test                # all 170
 npm run test:api        # 43 — auth, cart, coupons, checkout, stock, lifecycle, admin
 npm run test:ai         # 24 — recommender, assistant grounding, forecast honesty
 npm run test:security   # 20 — injection, IDOR, rate limits, headers, payments
 npm run test:ui         # 21 — the real pages in jsdom against a live server
 npm run test:browser    # 17 — real Chrome: layout, cascade, CSP, charts, a11y
+npm run test:3d         # 30 — real Chrome: all three cinematic scenes
 npm run test:assets     # 11 — photo files, licences, attribution, CSP hygiene
 npm run test:startup    #  4 — port clashes and production config refusal
 ```
@@ -294,6 +466,43 @@ Highlights of what is actually asserted:
 - the forecast refuses to predict below 14 days of history
 - an order can still be placed while the AI endpoints are failing
 - every redistributed photo is attributed with an author, licence and source
+- the 3D burger's real transform changes continuously with scroll — and
+  **rewinds exactly** when you scroll back up, which is what separates a
+  scrubbed timeline from a play-once reveal. The same is asserted of the
+  pizza, and of the Scene 2 cards
+- the burger and the pizza are genuinely on stage together at the
+  handoff, and both are gone before Scene 3 composes
+- every flavour card's count, lowest price and photo are checked against
+  the menu payload the page actually loaded, and every category on the
+  menu has a card
+- the featured dish's name, description, price, rating, prep time and
+  photo all match a real menu row, and its Add-to-cart really reaches
+  the cart
+- the plate's pointer tilt inverts across its centre, and a tap on a
+  touch device leaves no card stuck mid-tilt
+- Scene 3 really is pinned: its box stays at the top of the viewport and
+  fills it for the whole showcase
+- the pizza's four layers separate to more than four times their resting
+  spread and return to it exactly
+- the Scene 2 cards arrive from measurably different translateZ values,
+  their configured depths do not run in order, and their drift rewinds
+- choosing a category still lands you on the menu — the defect that pin
+  introduced, where a native smooth scroll was cancelled mid-flight and
+  stranded the page inside the pinned section
+- the journey's five legs wait at five different depths, climb in
+  sequence and rewind. Two defects hid here, and both were invisible in
+  the code: the pinned section above them adds a viewport of scroll
+  distance, and until it was given a refresh priority every trigger
+  below it resolved about 1035px too early, so the whole entrance played
+  out below the fold and the stages were already flat on arrival. Then,
+  because a staggered tween only writes a target's start values when
+  that target's own slot opens, four of the five stood at their finished
+  position until the scrub reached them and snapped backwards
+- nothing is rendered at all once the act is behind you
+- the ingredients genuinely separate mid-scroll and the layer stack
+  returns to its resting height by the end
+- reduced motion and a failed 3D bundle both leave a complete, working
+  flat page
 
 ### Browser testing
 
@@ -311,8 +520,27 @@ passes while the browser still paints the element:
 - the analytics bars have genuine, varying heights
 - Escape closes the cart and focus moves into it; the skip link appears on focus
 
-If Chrome or `playwright-core` is missing, that suite **skips and says so** —
+`tests/cinematic.test.js` does the same for the cinematic scenes. They
+expose their real rig values and scroll ranges on `window.__qbHero` and
+`window.__qbMotion`, and the tests read them at offsets derived from
+those ranges, because "the animation is genuinely scroll-linked" is the
+one claim about this feature which a screenshot cannot settle.
+
+Both suites **skip and say so** if Chrome or `playwright-core` is missing —
 a skip is never counted as a pass.
+
+> Several of the defects those tests now guard were invisible to every
+> existing check and were only found by looking at the rendered page: the
+> hero headline painting dark-on-dark (re-pointing a CSS custom property
+> does nothing for elements that merely *inherit* a computed colour); the
+> sticky header silently losing its stickiness because the rule that
+> lifted page content above the WebGL canvas set `position: relative` on
+> it; an onion ring standing on its edge like a bicycle wheel because
+> `TorusGeometry` is built in the XY plane; and the Scene 2 cards being
+> transparent enough mid-entrance for the pizza behind them to read
+> straight through the artwork; half the pizza sitting behind the glass
+> panel in Scene 3 (measured: pizza 463–977px, panel 140–715px); and a
+> renderer quietly drawing an invisible canvas at 120fps.
 
 ```bash
 npm run qa:visual       # screenshots at 3 widths + console/network/overflow report
@@ -328,6 +556,17 @@ clipped text. It is a QA tool, not part of the app.
   layout faults they revealed were fixed, but "does this look good" is not
   something a test asserts.
 - **Browsers other than Chrome.** Firefox and Safari/WebKit are unverified.
+  This matters more now than it did: the 3D hero leans on WebGL,
+  `backdrop-filter` and CSS mask gradients, none of which have been
+  checked outside Chrome.
+- **Frame rate on real low-end hardware.** The 118–121 fps figures are
+  headless Chrome on a developer machine, measured during the pinned
+  explode at 320, 390, 820 and 1440px. No phone, and no integrated-GPU
+  laptop, has been profiled.
+- **The modelled pizza is a generic margherita.** It is not a render of
+  whichever dish the showcase names — that dish's real name, price,
+  rating and photograph are in the panel beside it. If the menu's
+  best-rated pizza changes, the 3D object does not.
 - **Real devices.** Viewport emulation is not the same as a physical phone
   (touch targets, iOS Safari's dynamic toolbar, notch insets).
 - **Screen readers.** Semantics, labels and focus order are checked
@@ -384,6 +623,7 @@ npm run migrate -- --status    # what is applied, what is pending
 npm run migrate -- --backup    # back up, then migrate
 npm run reset                  # delete the database and re-seed from scratch
 npm run images                 # re-fetch dish photography
+npm run build:3d               # rebuild the cinematic 3D bundle
 ```
 
 Deployment, backups and platform constraints: **[DEPLOYMENT.md](DEPLOYMENT.md)**.

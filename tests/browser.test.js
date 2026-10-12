@@ -345,13 +345,33 @@ test('a failed dish photo falls back to the placeholder', skipIf(), async () => 
   await page.route('**/images/dishes/margherita-pizza.jpg', (r) => r.fulfill({ status: 404, body: '' }));
   await page.reload({ waitUntil: 'networkidle' });
   await page.waitForSelector('.dish');
-  await page.waitForTimeout(1200);
+
+  /*
+   * Dish photos are `loading="lazy"`, so the one under test has to be
+   * brought into view before it is requested at all. This used to pass
+   * without scrolling only because the menu happened to sit close
+   * enough to the fold; once more sections were added above it the
+   * image was never fetched, never errored, and the test reported a
+   * broken fallback when the fallback had simply never been asked to
+   * run. Scroll to the thing being tested.
+   */
+  await page.evaluate(async () => {
+    for (let y = 0; y < document.body.scrollHeight; y += 600) {
+      window.scrollTo(0, y);
+      await new Promise((r) => setTimeout(r, 90));
+    }
+    document.getElementById('menu').scrollIntoView();
+  });
+  await page.waitForTimeout(1500);
 
   const state = await page.evaluate(() => {
     const img = [...document.querySelectorAll('.dish img')].find((i) => i.alt === 'Classic Margherita Pizza');
-    return { src: img.getAttribute('src'), width: img.naturalWidth };
+    if (!img) return { missing: true };
+    return { src: img.getAttribute('src'), width: img.naturalWidth, complete: img.complete };
   });
 
+  assert.ok(!state.missing, 'the Margherita dish card was not on the menu at all');
+  assert.equal(state.complete, true, 'the broken photo was never even requested, so nothing could fall back');
   assert.match(state.src, /placeholder\.svg$/, 'the placeholder did not replace the broken photo');
   assert.ok(state.width > 0, 'the placeholder itself failed to decode');
 

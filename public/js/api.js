@@ -284,6 +284,50 @@
   const PLACEHOLDER = 'images/placeholder.svg';
 
   /**
+   * Scrolls a section into view, surviving a pinned ScrollTrigger on the
+   * way.
+   *
+   * `scrollIntoView({ behavior: 'smooth' })` cannot be used for this any
+   * more. A native smooth scroll picks its destination once, at the
+   * start, and a pinned section between here and there changes the
+   * scroll geometry while the animation is still running — ScrollTrigger
+   * nudges the scroll position as the pin engages, which cancels the
+   * native animation outright. Measured: clicking a category card left
+   * the page stranded at y=2487, in the middle of the pinned showcase,
+   * and it never arrived at the menu at all.
+   *
+   * This re-derives the absolute destination from the element's live
+   * rectangle on every frame, so any layout the pin moves underneath us
+   * is simply absorbed. `behavior: 'instant'` is essential: the
+   * stylesheet sets `scroll-behavior: smooth` globally, and without it
+   * each of these per-frame hops would start its own smooth animation.
+   */
+  function scrollToSection(target, { duration = 650 } = {}) {
+    const el = typeof target === 'string' ? document.querySelector(target) : target;
+    if (!el) return;
+
+    const jump = () => el.scrollIntoView({ behavior: 'instant', block: 'start' });
+
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return jump();
+    if (typeof requestAnimationFrame !== 'function') return jump();
+
+    const from = window.scrollY;
+    const started = performance.now();
+    const ease = (t) => (t < 0.5 ? 2 * t * t : 1 - ((-2 * t + 2) ** 2) / 2);
+
+    const step = (now) => {
+      const t = Math.min(1, (now - started) / duration);
+      // Absolute document position of the target, recomputed each frame.
+      const to = window.scrollY + el.getBoundingClientRect().top;
+
+      window.scrollTo({ top: from + (to - from) * ease(t), behavior: 'instant' });
+      if (t < 1) requestAnimationFrame(step);
+    };
+
+    requestAnimationFrame(step);
+  }
+
+  /**
    * Swaps in the placeholder for any image that fails to load.
    *
    * This is a single delegated listener rather than an inline `onerror`
@@ -385,7 +429,7 @@
 
   window.QB = {
     api, session, cart, guestCart: guest,
-    money, escapeHtml, timeAgo, formatDateTime, spiceLabel, stars,
+    money, escapeHtml, timeAgo, formatDateTime, spiceLabel, stars, scrollToSection,
     toast, theme, debounce, newIdempotencyKey, installImageFallback, PLACEHOLDER,
   };
 })();

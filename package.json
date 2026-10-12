@@ -25,7 +25,9 @@
     "test:assets": "node --test tests/assets.test.js",
     "test:startup": "node --test tests/startup.test.js",
     "qa:visual": "node scripts/visual-qa.js",
-    "credits": "node scripts/fetch-images.js --credits-only"
+    "credits": "node scripts/fetch-images.js --credits-only",
+    "build:3d": "node scripts/build-cinematic.js",
+    "test:3d": "node --test tests/cinematic.test.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -33,7 +35,10 @@
     "jsonwebtoken": "^9.0.2"
   },
   "devDependencies": {
+    "esbuild": "^0.28.2",
+    "gsap": "^3.15.0",
     "jsdom": "^25.0.1",
-    "playwright-core": "^1.64.0"
+    "playwright-core": "^1.64.0",
+    "three": "^0.186.1"
   }
 }

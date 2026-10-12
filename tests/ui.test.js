@@ -435,6 +435,17 @@ test('signing in adopts the guest cart and reveals the account menu', async () =
   assert.equal(doc.getElementById('accountEmail').textContent, 'ui@test.local');
   assert.equal(doc.getElementById('accountName').textContent, 'Uma');
 
+  /*
+   * Adopting the guest basket is a second request that lands after the
+   * session is established, so the sign-in button hides before the cart
+   * has caught up. Asserting straight after the button disappeared was
+   * a race, and it lost under the parallel load of the full suite. The
+   * claim is unchanged — it is just no longer checked early.
+   */
+  await waitFor(
+    () => doc.getElementById('cartCount').textContent === '1',
+    'the guest basket to be adopted'
+  );
   assert.equal(doc.getElementById('cartCount').textContent, '1', 'the guest basket moved across');
   assert.equal(window.localStorage.getItem('qb_guest_cart'), null);
 

@@ -9,6 +9,8 @@
   <link rel="icon" href="images/logo.png" />
   <link rel="preload" as="image" href="images/dishes/margherita-pizza.jpg" />
   <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/cinematic.css" />
+  <link rel="stylesheet" href="css/scenes.css" />
 </head>
 <body>
 
@@ -109,6 +111,48 @@
     </div>
   </section>
 
+
+  <!-- ================================================================ -->
+  <!-- Scene 2 — Explore flavours                                       -->
+  <!--                                                                  -->
+  <!-- Cards are rendered by js/scenes.js from the real menu payload:    -->
+  <!-- real categories, real dish counts, real lowest prices and a real  -->
+  <!-- photo from each category. Clicking one drives the existing menu   -->
+  <!-- filter rather than a parallel one of its own.                     -->
+  <section class="section scene scene--flavours" id="flavours" aria-labelledby="flavoursHeading">
+    <div class="shell">
+      <header class="section-head section-head--stack">
+        <div>
+          <p class="eyebrow">Explore flavours</p>
+          <h2 id="flavoursHeading">Every craving has a corner</h2>
+          <p>Eight kitchens, one menu. Pick a corner and we will take you straight to it.</p>
+        </div>
+      </header>
+
+      <div class="flavour-grid" id="flavourGrid" aria-busy="true"
+           aria-label="Browse the menu by category"></div>
+    </div>
+  </section>
+
+  <!-- ================================================================ -->
+  <!-- Scene 3 — Featured dish                                          -->
+  <!--                                                                  -->
+  <!-- Filled by js/scenes.js from the highest-rated pizza actually on   -->
+  <!-- the menu. Nothing here is written by hand: name, description,     -->
+  <!-- price, rating, prep time, photo and stock all come from the API,  -->
+  <!-- and the buttons reuse the real cart and detail handlers.          -->
+  <section class="section scene scene--featured" id="featured" aria-labelledby="featuredHeading" hidden>
+    <div class="shell featured-grid">
+      <div class="featured-copy">
+        <p class="eyebrow" id="featuredEyebrow">Tonight&rsquo;s showcase</p>
+        <h2 id="featuredHeading"></h2>
+        <div id="featuredBody"></div>
+      </div>
+
+      <div class="featured-art" id="featuredArt"></div>
+    </div>
+  </section>
+
   <!-- ================================================================ -->
   <section class="section" id="picks" aria-labelledby="picksHeading">
     <div class="shell">
@@ -183,31 +227,96 @@
   </section>
 
   <!-- ================================================================ -->
-  <section class="section" id="how" aria-labelledby="howHeading">
+  <!-- Scene 4 — the delivery journey                                   -->
+  <!--                                                                  -->
+  <!-- Keeps the id "how" so the existing nav link still lands here.    -->
+  <!-- The stages are rendered by js/scenes.js and mirror the real      -->
+  <!-- lifecycle in server/orderState.js.                               -->
+  <section class="section scene scene--journey" id="how" aria-labelledby="howHeading">
     <div class="shell">
-      <header class="section-head" style="justify-content:center;text-align:center">
-        <div><h2 id="howHeading">How it works</h2></div>
+      <header class="section-head section-head--stack">
+        <div>
+          <p class="eyebrow">How it works</p>
+          <h2 id="howHeading">From our pan to your door</h2>
+          <p>Five stages, and you can watch every one of them happen live on your orders page.</p>
+        </div>
       </header>
 
-      <ol class="steps">
-        <li>
-          <span class="step-num">1</span>
-          <h3>Pick your food</h3>
-          <p>Browse 30 dishes, filter by diet, budget or spice, and let the assistant suggest what fits.</p>
-        </li>
-        <li>
-          <span class="step-num">2</span>
-          <h3>Checkout securely</h3>
-          <p>Totals, taxes and coupons are all calculated on our server. The price you see is the price you pay.</p>
-        </li>
-        <li>
-          <span class="step-num">3</span>
-          <h3>Track it live</h3>
-          <p>Watch your order move from the kitchen to your door, and cancel free before cooking starts.</p>
-        </li>
-      </ol>
+      <ol class="journey" id="journeyTrack" aria-label="What happens after you order"></ol>
+    </div>
+  </section>
 
-      <div class="coupon-strip" id="couponStrip"></div>
+  <!-- ================================================================ -->
+  <!-- Scene 5 — offers. Real coupons, straight from the API.           -->
+  <section class="section scene scene--offers" id="offers" aria-labelledby="offersHeading">
+    <div class="shell">
+      <header class="section-head section-head--stack">
+        <div>
+          <p class="eyebrow">Today&rsquo;s offers</p>
+          <h2 id="offersHeading">Codes that actually work</h2>
+          <p>Every one of these is live right now, with its real terms. Apply them in the cart.</p>
+        </div>
+      </header>
+
+      <div class="offer-grid" id="couponStrip" aria-busy="true"></div>
+    </div>
+  </section>
+
+  <!-- ================================================================ -->
+  <!-- Scene 6 — reviews, written by people who were actually delivered -->
+  <!-- the dish they are talking about.                                 -->
+  <section class="section scene scene--reviews" id="reviews" aria-labelledby="reviewsHeading" hidden>
+    <div class="shell">
+      <header class="section-head section-head--stack">
+        <div>
+          <p class="eyebrow">In their words</p>
+          <h2 id="reviewsHeading">What people say after it arrives</h2>
+          <p id="reviewsNote">Only customers whose order was delivered can leave one.</p>
+        </div>
+      </header>
+
+      <div class="review-rail" id="reviewRail" aria-label="Recent customer reviews"></div>
+    </div>
+  </section>
+
+  <!-- ================================================================ -->
+  <!-- Scene 7 — the kitchens.                                          -->
+  <!--                                                                  -->
+  <!-- QuickBite is one restaurant, not a marketplace: there is no       -->
+  <!-- partner-restaurant table to read from, so this shows the real     -->
+  <!-- cuisines the kitchen cooks and their real dish counts rather      -->
+  <!-- than inventing venues.                                            -->
+  <section class="section scene scene--kitchens" id="kitchens" aria-labelledby="kitchensHeading">
+    <div class="shell">
+      <header class="section-head section-head--stack">
+        <div>
+          <p class="eyebrow">Our kitchens</p>
+          <h2 id="kitchensHeading">Six kitchens under one roof</h2>
+          <p>One restaurant, six traditions, all cooked to order in the same building.</p>
+        </div>
+      </header>
+
+      <div class="kitchen-grid" id="kitchenGrid" aria-busy="true"></div>
+    </div>
+  </section>
+
+  <!-- ================================================================ -->
+  <!-- Scene 8 — the finale. Figures come from the live menu.           -->
+  <section class="section scene scene--finale" id="finale" aria-labelledby="finaleHeading">
+    <div class="shell finale-shell">
+      <p class="eyebrow">Still hungry?</p>
+      <h2 id="finaleHeading">Good food. <em>Good mood.</em></h2>
+      <p class="finale-lede">
+        Thirty dishes, cooked when you order them, tracked from the pan to your
+        doorstep. No hidden charges and no cold arrivals.
+      </p>
+
+      <ul class="finale-stats" id="finaleStats"></ul>
+
+      <div class="finale-actions">
+        <a class="btn btn--primary btn--lg" href="#menu" data-finale-order>Order now</a>
+        <a class="btn btn--ghost btn--lg" href="orders.html">Track an order</a>
+      </div>
     </div>
   </section>
 </main>
@@ -420,5 +529,20 @@
 
 <script src="js/api.js"></script>
 <script src="js/app.js"></script>
+
+<!--
+  Scenes 2 and 3: the flavour categories and the featured dish. A plain
+  script with no dependencies, so the content and every interaction work
+  whether or not the 3D layer or the motion bundle ever load.
+-->
+<script src="js/scenes.js"></script>
+
+<!--
+  The cinematic 3D hero. A module script, so it is deferred by default and
+  cannot block the page; it feature-detects and then lazy-loads Three.js
+  only when the visitor can actually benefit. Without it the hero simply
+  keeps the photo collage above.
+-->
+<script type="module" src="js/cinematic/boot.js"></script>
 </body>
 </html>
