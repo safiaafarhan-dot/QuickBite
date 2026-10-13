@@ -5,9 +5,13 @@ build a cart, check out, and watch the order move from the kitchen to your door.
 The restaurant side gets its own dashboard with live orders, stock control,
 analytics and a demand forecast.
 
-Built with **Express 4**, **SQLite** (via Node's built-in `node:sqlite` — no
-native modules to compile) and plain HTML/CSS/JavaScript. No build step, no
-front-end framework, three runtime dependencies.
+Built with **Express 4**, **PostgreSQL** (via `pg`) and plain
+HTML/CSS/JavaScript. No build step, no front-end framework, four runtime
+dependencies.
+
+The app keeps nothing on its own filesystem, so it deploys to any stateless
+container host — including a free one. See
+**[DEPLOYMENT.md](DEPLOYMENT.md)** for the Render + Supabase free-tier path.
 
 ---
 
@@ -15,11 +19,22 @@ front-end framework, three runtime dependencies.
 
 ```bash
 npm install
+
+# QuickBite needs a PostgreSQL to talk to. Anything reachable will do:
+#   docker run -d --name qb-pg -p 5432:5432 \
+#     -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=quickbite postgres:16
+export DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:5432/quickbite'
+
+npm run migrate   # create the schema and load the 30-dish menu
 npm run seed      # demo accounts + 45 days of synthetic order history
 npm start         # http://localhost:3000
 ```
 
-`npm run dev` restarts on change. `npm test` runs all 140 tests.
+`npm run dev` restarts on change. `npm test` runs the full suite — it needs a
+database too, and skips loudly without one (see [Tests](#tests)).
+
+Already have a SQLite QuickBite? `node scripts/import-sqlite.js ./data/quickbite.db`
+brings its orders across — DEPLOYMENT.md §4.
 
 ### Demo accounts
 
@@ -313,7 +328,8 @@ dependency count is still three.
 QuickBite/
 ├── server/
 │   ├── index.js            Express app: middleware, routes, static site, errors
-│   ├── db.js               SQLite connection, transactions, reference-data seed
+│   ├── db.js               PostgreSQL pool, query helpers, transactions
+│   ├── seedReference.js    Menu and coupon upserts, safe to re-run
 │   ├── migrations.js       Forward-only, additive schema migrations
 │   ├── auth.js             bcrypt hashing, JWTs, auth middleware
 │   ├── middleware.js       Security headers, rate limiting, logging, validation
@@ -346,9 +362,11 @@ QuickBite/
 │   ├── visual-qa.js        Screenshot + console/overflow sweep in real Chrome
 │   ├── build-cinematic.js  Tree-shakes and minifies the 3D bundle
 │   ├── migrate.js          Deploy-time migration runner
+│   ├── import-sqlite.js    One-way import of an existing SQLite database
+│   ├── reset-db.js         Drops and rebuilds the schema (development only)
 │   └── fetch-images.js     Pulls openly-licensed dish photos from Commons
-├── tests/                  170 tests across 8 suites
-├── data/                   The SQLite file (git-ignored)
+├── tests/                  182 tests across 8 suites
+├── render.yaml             Render blueprint; secrets stay out of git
 └── legacy/                 The original prototype, kept for reference
 ```
 
@@ -447,8 +465,20 @@ npm run test:assets     # 11 — photo files, licences, attribution, CSP hygiene
 npm run test:startup    #  4 — port clashes and production config refusal
 ```
 
-Each suite gets its own throwaway SQLite file, so suites never see each other's
-data and nothing can touch a real database.
+Each suite gets its own PostgreSQL **schema**, created at the start of the run
+and dropped at the end, so suites never see each other's data.
+
+The suites therefore need a real PostgreSQL. Point them at one you do not mind
+being written to:
+
+```bash
+export TEST_DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:5432/quickbite_test'
+npm test
+```
+
+Without it the database-backed suites **skip loudly** — never silently, and
+never counted as passes — exactly as the browser suites do when Chrome is
+missing.
 
 Highlights of what is actually asserted:
 
@@ -611,7 +641,9 @@ See `.env.example` for the full list. The ones that matter:
 | --- | --- | --- |
 | `JWT_SECRET` | dev-only default | **Required** when `NODE_ENV=production` — the server refuses to start without it |
 | `PORT` | `3000` | |
-| `DB_FILE` | `data/quickbite.db` | |
+| `DATABASE_URL` | *(none)* | **Required.** PostgreSQL connection string |
+| `TEST_DATABASE_URL` | *(none)* | Used by the test suite only |
+| `PGPOOL_MAX` | `8` | Connection pool ceiling |
 | `TRUST_PROXY_HOPS` | `0` | Set to `1` behind a reverse proxy |
 | `PAYMENT_WEBHOOK_SECRET` | *(none)* | Without it the webhook rejects everything |
 | `ANTHROPIC_API_KEY` | *(none)* | Optional — only changes how the assistant *phrases* replies |
@@ -619,9 +651,9 @@ See `.env.example` for the full list. The ones that matter:
 Useful commands:
 
 ```bash
-npm run migrate -- --status    # what is applied, what is pending
-npm run migrate -- --backup    # back up, then migrate
-npm run reset                  # delete the database and re-seed from scratch
+npm run migrate:status         # what is applied, what is pending
+npm run import:sqlite -- <file>  # bring an old SQLite database across
+npm run reset -- --yes         # drop and rebuild the schema (development only)
 npm run images                 # re-fetch dish photography
 npm run build:3d               # rebuild the cinematic 3D bundle
 ```
@@ -632,8 +664,10 @@ Deployment, backups and platform constraints: **[DEPLOYMENT.md](DEPLOYMENT.md)**
 
 ## Notes
 
-- Requires **Node 22.5+** for `node:sqlite`. An experimental-feature warning on
-  start is expected.
+- Requires **Node 22.5+** and a **PostgreSQL 13+** database.
+  `scripts/import-sqlite.js` reads the old format with Node's built-in
+  `node:sqlite`, which prints an experimental-feature warning; nothing else
+  touches SQLite.
 - Dish photography comes from Wikimedia Commons under licences that permit
   redistribution; every photo's author and licence is recorded in
   [`public/images/dishes/CREDITS.md`](public/images/dishes/CREDITS.md).

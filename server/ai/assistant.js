@@ -17,17 +17,19 @@
  * receives customer names, emails, addresses, phone numbers or payment details.
  */
 
-const { db } = require('./../db');
+const { sql } = require('./../db');
 const { recommend } = require('./recommend');
 
 const MAX_QUESTION_LENGTH = 300;
 const LLM_TIMEOUT_MS = Number(process.env.AI_TIMEOUT_MS) || 8000;
 
-const availableItems = db.prepare(`
+const AVAILABLE_ITEMS = `
   SELECT id, slug, name, description, price, image, category, cuisine, tags,
          is_veg, is_popular, rating, prep_minutes, spice_level, calories
   FROM menu_items WHERE is_available = 1 AND stock > 0
-`);
+`;
+
+const availableItems = () => sql.all(AVAILABLE_ITEMS);
 
 /* ------------------------------------------------------------------ */
 /* Stage 1 — understanding the question                                */
@@ -69,7 +71,7 @@ const MOOD_TAGS = {
  * inspectable — the result is returned to the client so the UI can show what
  * the assistant understood.
  */
-function parseQuestion(text) {
+async function parseQuestion(text) {
   const q = text.toLowerCase();
   const constraints = {
     budget: null,
@@ -116,7 +118,7 @@ function parseQuestion(text) {
 
   // Ingredients that actually appear somewhere on the menu.
   const vocabulary = new Set();
-  for (const item of availableItems.all()) {
+  for (const item of await availableItems()) {
     for (const word of `${item.name} ${item.tags}`.toLowerCase().split(/[\s,]+/)) {
       if (word.length > 3) vocabulary.add(word);
     }
@@ -136,8 +138,8 @@ function parseQuestion(text) {
 }
 
 /** Scores every available dish against the parsed constraints. */
-function findMatches(constraints, { limit = 4, userId = null } = {}) {
-  let items = availableItems.all();
+async function findMatches(constraints, { limit = 4, userId = null } = {}) {
+  let items = await availableItems();
 
   // Hard filters — these are promises, not preferences.
   if (constraints.diet === 'veg') items = items.filter((i) => i.is_veg);
@@ -208,7 +210,7 @@ function findMatches(constraints, { limit = 4, userId = null } = {}) {
     || constraints.moods.length > 0 || constraints.ingredients.length > 0;
 
   if (!hasConstraints) {
-    const { items: recommended } = recommend({ userId, limit });
+    const { items: recommended } = await recommend({ userId, limit });
     return { items: recommended, reason: 'recommended' };
   }
 
@@ -358,8 +360,8 @@ async function ask(question, { userId = null } = {}) {
     };
   }
 
-  const constraints = parseQuestion(text);
-  const { items: matches, reason } = findMatches(constraints, { userId });
+  const constraints = await parseQuestion(text);
+  const { items: matches, reason } = await findMatches(constraints, { userId });
 
   const deterministic = composeReply(constraints, matches, reason);
   const phrased = await phraseWithLlm(text, matches, constraints);

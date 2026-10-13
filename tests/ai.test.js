@@ -11,15 +11,28 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
-  prepareEnvironment, cleanup, makeClient, uniqueEmail,
+  prepareEnvironment, initTestDb, databaseUnavailable, cleanup, makeClient, uniqueEmail,
   GOOD_PASSWORD, VALID_ADDRESS, VALID_PHONE,
 } = require('./helpers');
 
-const DB_FILE = prepareEnvironment('ai');
+
+/*
+ * These suites need a real PostgreSQL. Without one they skip loudly rather
+ * than failing or, worse, silently passing — the same contract the browser
+ * suites use when Chrome is unavailable.
+ */
+const unavailable = databaseUnavailable();
+if (unavailable) {
+  console.log(`\n  ⊘ AI tests skipped — ${unavailable}\n`);
+  test('AI suite needs a PostgreSQL test database', { skip: unavailable }, () => {});
+  return;
+}
+
+const SCHEMA = prepareEnvironment('ai');
 
 const app = require('../server/index');
 const { hashPassword } = require('../server/auth');
-const { db } = require('../server/db');
+const { sql } = require('../server/db');
 const { recommend, similarTo, cosine, featureVector } = require('../server/ai/recommend');
 const { parseQuestion, findMatches, ask, llmConfigured } = require('../server/ai/assistant');
 const analytics = require('../server/ai/analytics');
@@ -30,21 +43,20 @@ const call = makeClient(() => base);
 const dish = {};
 
 test.before(async () => {
+  await initTestDb();
   server = app.listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
   base = `http://127.0.0.1:${server.address().port}`;
 
-  db.prepare('INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)').run(
-    'AI Admin', 'aiadmin@test.local', await hashPassword('adminpass1'), 'admin'
-  );
+  await sql.run('INSERT INTO users (name, email, password_hash, role) VALUES ($1, $2, $3, $4)',
+    ['AI Admin', 'aiadmin@test.local', await hashPassword('adminpass1'), 'admin']);
 
-  for (const row of db.prepare('SELECT id, slug, name FROM menu_items').all()) dish[row.slug] = row;
+  for (const row of await sql.all('SELECT id, slug, name FROM menu_items')) dish[row.slug] = row;
 });
 
-test.after(() => {
+test.after(async () => {
   server?.close();
-  db.close();
-  cleanup(DB_FILE);
+  await cleanup(SCHEMA);
 });
 
 async function newCustomer() {
@@ -78,7 +90,7 @@ test('a brand-new visitor gets popular dishes, labelled as such', async () => {
 
   // Everything recommended must be a real, orderable dish.
   for (const item of body.items) {
-    const row = db.prepare('SELECT is_available, stock FROM menu_items WHERE id = ?').get(item.id);
+    const row = await sql.get('SELECT is_available, stock FROM menu_items WHERE id = $1', [item.id]);
     assert.ok(row, `recommended item ${item.id} exists`);
     assert.equal(row.is_available, 1);
     assert.ok(row.stock > 0);
@@ -111,14 +123,14 @@ test('ordering history turns recommendations personal', async () => {
   assert.equal(after.body.strategy, 'personalised');
   assert.ok(after.body.signals.content_based_on >= 3);
 
-  const direct = recommend({ userId: user.id, limit: 6 });
+  const direct = await recommend({ userId: user.id, limit: 6 });
   const indianCount = direct.items.filter((i) => i.cuisine === 'indian').length;
   assert.ok(indianCount >= 2, `expected Indian dishes to surface, got ${indianCount}`);
 });
 
 test('collaborative filtering stays off until enough baskets exist', async () => {
   const { user } = await newCustomer();
-  const result = recommend({ userId: user.id });
+  const result = await recommend({ userId: user.id });
 
   assert.equal(result.signals.collaborative_active, false);
   assert.ok(result.signals.collaborative_baskets < result.signals.min_baskets_required);
@@ -135,7 +147,7 @@ test('collaborative filtering switches on once baskets accumulate', async () => 
   const { token, user } = await newCustomer();
   await orderDishes(token, ['margherita-pizza']);
 
-  const result = recommend({ userId: user.id, limit: 6 });
+  const result = await recommend({ userId: user.id, limit: 6 });
   assert.equal(result.signals.collaborative_active, true);
   assert.equal(result.strategy, 'hybrid');
 
@@ -149,8 +161,8 @@ test('recommendations never include a dish already excluded', async () => {
   assert.ok(!body.items.some((i) => i.id === excludeId));
 });
 
-test('an impossible filter returns an empty, explained result rather than an error', () => {
-  const result = recommend({ diet: 'veg', maxPrice: 1 });
+test('an impossible filter returns an empty, explained result rather than an error', async () => {
+  const result = await recommend({ diet: 'veg', maxPrice: 1 });
   assert.deepEqual(result.items, []);
   assert.equal(result.strategy, 'none');
   assert.match(result.explanation, /No dishes match/i);
@@ -162,7 +174,7 @@ test('"goes well with" works from the very first visit and prefers other courses
   assert.equal(body.items.length, 4);
   assert.ok(!body.items.some((i) => i.id === dish['margherita-pizza'].id), 'never suggests itself');
 
-  const direct = similarTo(dish['chicken-biryani'].id, { limit: 6 });
+  const direct = await similarTo(dish['chicken-biryani'].id, { limit: 6 });
   assert.ok(direct.items.length > 0);
   assert.ok(direct.items.every((i) => i.match >= 0 && i.match <= 100));
 });
@@ -181,25 +193,25 @@ test('the similarity maths behaves', () => {
 /* Assistant                                                           */
 /* ================================================================== */
 
-test('the question parser extracts budget, diet, cuisine, course and mood', () => {
-  const a = parseQuestion('something spicy and vegetarian under 400');
+test('the question parser extracts budget, diet, cuisine, course and mood', async () => {
+  const a = await parseQuestion('something spicy and vegetarian under 400');
   assert.equal(a.budget, 400);
   assert.equal(a.diet, 'veg');
   assert.equal(a.minSpice, 2);
 
-  const b = parseQuestion('a mild italian pasta for dinner');
+  const b = await parseQuestion('a mild italian pasta for dinner');
   assert.equal(b.cuisine, 'italian');
   assert.equal(b.maxSpice, 1);
 
-  const c = parseQuestion('cheap dessert');
+  const c = await parseQuestion('cheap dessert');
   assert.equal(c.course, 'desserts');
   assert.ok(c.budget > 0, 'a vague "cheap" still becomes a real ceiling');
 
-  const d = parseQuestion('chicken biryani for 4 people');
+  const d = await parseQuestion('chicken biryani for 4 people');
   assert.equal(d.diet, 'nonveg');
   assert.equal(d.peopleCount, 4);
 
-  const e = parseQuestion('I am in a hurry');
+  const e = await parseQuestion('I am in a hurry');
   assert.equal(e.quick, true);
 });
 
@@ -215,7 +227,7 @@ test('the assistant only ever names dishes that are on the menu', async () => {
   ];
 
   const realNames = new Set(
-    db.prepare('SELECT name FROM menu_items').all().map((r) => r.name)
+    (await sql.all('SELECT name FROM menu_items')).map((r) => r.name)
   );
 
   for (const question of questions) {
@@ -225,7 +237,7 @@ test('the assistant only ever names dishes that are on the menu', async () => {
 
     for (const item of body.items) {
       assert.ok(realNames.has(item.name), `invented dish "${item.name}" for "${question}"`);
-      const row = db.prepare('SELECT price FROM menu_items WHERE name = ?').get(item.name);
+      const row = await sql.get('SELECT price FROM menu_items WHERE name = $1', [item.name]);
       assert.equal(item.price, row.price, `wrong price quoted for ${item.name}`);
     }
   }
@@ -273,12 +285,12 @@ test('the assistant reports which engine answered', async () => {
   assert.equal(status.body.llm_configured, llmConfigured());
 });
 
-test('the assistant works with no LLM configured — the default in this repo', () => {
+test('the assistant works with no LLM configured — the default in this repo', async () => {
   // The suite never sets ANTHROPIC_API_KEY, so this is the fallback path and
   // every assistant test above has already exercised it.
   assert.equal(llmConfigured(), false);
 
-  const { items } = findMatches(parseQuestion('spicy vegetarian under 400'));
+  const { items } = await findMatches(await parseQuestion('spicy vegetarian under 400'));
   assert.ok(items.length > 0);
   assert.ok(items.every((i) => i.is_veg && i.price <= 400));
 });
@@ -308,7 +320,7 @@ test('descriptive analytics are returned from real orders', async () => {
   assert.ok(body.peak_hour, 'a peak hour is identified once orders exist');
 
   // Totals must agree with the database, not be approximated.
-  const real = db.prepare("SELECT COUNT(*) AS n, SUM(total) AS t FROM orders WHERE status != 'cancelled'").get();
+  const real = await sql.get("SELECT COUNT(*) AS n, SUM(total) AS t FROM orders WHERE status <> 'cancelled'");
   assert.equal(body.totals.orders, real.n);
   assert.equal(body.totals.revenue, real.t);
 });
@@ -381,7 +393,7 @@ test('trends report honestly when there is not enough to compare', async () => {
 
 test('a failing AI layer never blocks ordering', async () => {
   // Break the recommender's data source, then prove the shop still works.
-  const original = db.prepare;
+  const original = sql.all;
   const { token } = await newCustomer();
 
   await call('POST', '/api/cart/items', { token, body: { item_id: dish['veggie-burger'].id, quantity: 1 } });
@@ -397,7 +409,7 @@ test('a failing AI layer never blocks ordering', async () => {
   assert.equal(placed.status, 201);
   assert.ok(placed.body.order.total > 0);
 
-  assert.equal(db.prepare, original, 'the test did not leave the database patched');
+  assert.equal(sql.all, original, 'the test did not leave the database patched');
 });
 
 test('browsing events are recorded for signed-in customers only', async () => {
@@ -409,7 +421,7 @@ test('browsing events are recorded for signed-in customers only', async () => {
   const ok = await call('POST', '/api/ai/events', { token, body: { item_id: id, action: 'view' } });
   assert.equal(ok.status, 204);
 
-  const rows = db.prepare('SELECT * FROM item_events WHERE user_id = ? AND item_id = ?').all(user.id, id);
+  const rows = await sql.all('SELECT * FROM item_events WHERE user_id = $1 AND item_id = $2', [user.id, id]);
   assert.ok(rows.length >= 1);
 
   assert.equal((await call('POST', '/api/ai/events', { token, body: { item_id: 9999 } })).status, 404);

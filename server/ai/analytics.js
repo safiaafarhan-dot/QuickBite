@@ -13,7 +13,7 @@
  * only the days before them, and the error is measured against what happened.
  */
 
-const { db } = require('./../db');
+const { sql } = require('./../db');
 
 /** Minimum distinct days of sales before a forecast is offered at all. */
 const MIN_DAYS_FOR_FORECAST = 14;
@@ -21,35 +21,50 @@ const MIN_DAYS_FOR_FORECAST = 14;
 const MIN_DAYS_FOR_SEASONALITY = 21;
 const HOLDOUT_DAYS = 7;
 
-const dailyOrders = db.prepare(`
-  SELECT date(placed_at) AS day,
-         COUNT(*)        AS orders,
-         SUM(total)      AS revenue
+/*
+ * Every date expression below is evaluated `AT TIME ZONE 'UTC'`, and that is
+ * not decoration.
+ *
+ * SQLite stored these timestamps as UTC text, so `date()` and `strftime()`
+ * bucketed them by UTC day and UTC hour. A PostgreSQL `timestamptz` cast to
+ * `date` is converted using the *session* time zone instead, so on a server
+ * running in IST every order placed after 18:30 UTC would move into the next
+ * day — silently shifting the daily series, the busiest-hour figure and the
+ * weekday seasonality the forecast is built on. Pinning the zone keeps the
+ * buckets identical to the ones the SQLite build produced.
+ *
+ * `::int` is needed because EXTRACT returns numeric, which node-postgres
+ * hands back as a string; `DAY_NAMES[d.weekday]` would then index with "3".
+ */
+const DAILY_ORDERS = `
+  SELECT (placed_at AT TIME ZONE 'UTC')::date AS day,
+         COUNT(*)   AS orders,
+         SUM(total) AS revenue
   FROM orders
-  WHERE status != 'cancelled'
+  WHERE status <> 'cancelled'
   GROUP BY day
   ORDER BY day
-`);
+`;
 
-const hourly = db.prepare(`
-  SELECT CAST(strftime('%H', placed_at) AS INTEGER) AS hour,
+const HOURLY = `
+  SELECT EXTRACT(HOUR FROM placed_at AT TIME ZONE 'UTC')::int AS hour,
          COUNT(*) AS orders,
          SUM(total) AS revenue
   FROM orders
-  WHERE status != 'cancelled'
+  WHERE status <> 'cancelled'
   GROUP BY hour ORDER BY hour
-`);
+`;
 
-const weekday = db.prepare(`
-  SELECT CAST(strftime('%w', placed_at) AS INTEGER) AS weekday,
+const WEEKDAY = `
+  SELECT EXTRACT(DOW FROM placed_at AT TIME ZONE 'UTC')::int AS weekday,
          COUNT(*) AS orders,
          SUM(total) AS revenue
   FROM orders
-  WHERE status != 'cancelled'
+  WHERE status <> 'cancelled'
   GROUP BY weekday ORDER BY weekday
-`);
+`;
 
-const topDishes = db.prepare(`
+const TOP_DISHES = `
   SELECT oi.item_id, oi.name,
          SUM(oi.quantity) AS units,
          SUM(oi.quantity * oi.price) AS revenue,
@@ -59,9 +74,9 @@ const topDishes = db.prepare(`
   GROUP BY oi.item_id, oi.name
   ORDER BY units DESC
   LIMIT 10
-`);
+`;
 
-const categoryMix = db.prepare(`
+const CATEGORY_MIX = `
   SELECT m.category,
          SUM(oi.quantity) AS units,
          SUM(oi.quantity * oi.price) AS revenue
@@ -71,12 +86,35 @@ const categoryMix = db.prepare(`
   WHERE o.status != 'cancelled'
   GROUP BY m.category
   ORDER BY revenue DESC
-`);
+`;
 
-const couponUse = db.prepare(`
+const COUPON_USE = `
   SELECT code, COUNT(*) AS redemptions, SUM(amount_off) AS discount_given
   FROM coupon_redemptions GROUP BY code ORDER BY redemptions DESC
-`);
+`;
+
+const TOTALS = `
+  SELECT COUNT(*) AS orders,
+         COALESCE(SUM(total), 0) AS revenue,
+         COALESCE(SUM(discount), 0) AS discounts
+  FROM orders WHERE status <> 'cancelled'
+`;
+
+/*
+ * `now() - interval '7 days'` replaces `datetime('now','-7 days')`. The
+ * comparison is against a timestamptz on both sides, so no zone pinning is
+ * needed here — unlike the bucketing above, a rolling window is the same
+ * instant whatever the session zone.
+ */
+const TRENDS = `
+  SELECT oi.name,
+         SUM(CASE WHEN o.placed_at >= now() - interval '7 days'  THEN oi.quantity ELSE 0 END) AS recent,
+         SUM(CASE WHEN o.placed_at <  now() - interval '7 days'
+                   AND o.placed_at >= now() - interval '14 days' THEN oi.quantity ELSE 0 END) AS previous
+  FROM order_items oi JOIN orders o ON o.id = oi.order_id
+  WHERE o.status <> 'cancelled' AND o.placed_at >= now() - interval '14 days'
+  GROUP BY oi.name
+`;
 
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -171,26 +209,26 @@ function evaluate(series) {
 /* ------------------------------------------------------------------ */
 
 /** Descriptive analytics — always available, whatever the data volume. */
-function describe() {
-  const daily = dailyOrders.all();
+async function describe() {
+  const daily = await sql.all(DAILY_ORDERS);
   const series = densify(daily);
 
-  const hours = hourly.all();
+  const hours = await sql.all(HOURLY);
   const peak = hours.length
     ? hours.reduce((best, h) => (h.orders > best.orders ? h : best), hours[0])
     : null;
 
-  const days = weekday.all().map((d) => ({ ...d, name: DAY_NAMES[d.weekday] }));
+  const days = (await sql.all(WEEKDAY)).map((d) => ({ ...d, name: DAY_NAMES[d.weekday] }));
   const busiestDay = days.length
     ? days.reduce((best, d) => (d.orders > best.orders ? d : best), days[0])
     : null;
 
-  const totals = db.prepare(`
-    SELECT COUNT(*) AS orders,
-           COALESCE(SUM(total), 0) AS revenue,
-           COALESCE(SUM(discount), 0) AS discounts
-    FROM orders WHERE status != 'cancelled'
-  `).get();
+  const [totals, topItems, categoryMixRows, coupons] = await Promise.all([
+    sql.get(TOTALS),
+    sql.all(TOP_DISHES),
+    sql.all(CATEGORY_MIX),
+    sql.all(COUPON_USE),
+  ]);
 
   return {
     totals: {
@@ -204,9 +242,9 @@ function describe() {
     by_weekday: days,
     peak_hour: peak ? { ...peak, label: `${String(peak.hour).padStart(2, '0')}:00` } : null,
     busiest_day: busiestDay,
-    top_items: topDishes.all(),
-    category_mix: categoryMix.all(),
-    coupons: couponUse.all(),
+    top_items: topItems,
+    category_mix: categoryMixRows,
+    coupons,
   };
 }
 
@@ -215,8 +253,8 @@ function describe() {
  *
  * @returns {{available: boolean, reason?: string, days?: object[], accuracy?: object}}
  */
-function forecast({ horizon = 7 } = {}) {
-  const series = densify(dailyOrders.all());
+async function forecast({ horizon = 7 } = {}) {
+  const series = densify(await sql.all(DAILY_ORDERS));
 
   if (series.length < MIN_DAYS_FOR_FORECAST) {
     return {
@@ -264,16 +302,8 @@ function forecast({ horizon = 7 } = {}) {
 }
 
 /** Dishes whose sales are trending up or down over the last two weeks. */
-function trends() {
-  const rows = db.prepare(`
-    SELECT oi.name,
-           SUM(CASE WHEN o.placed_at >= datetime('now', '-7 days')  THEN oi.quantity ELSE 0 END) AS recent,
-           SUM(CASE WHEN o.placed_at <  datetime('now', '-7 days')
-                     AND o.placed_at >= datetime('now', '-14 days') THEN oi.quantity ELSE 0 END) AS previous
-    FROM order_items oi JOIN orders o ON o.id = oi.order_id
-    WHERE o.status != 'cancelled' AND o.placed_at >= datetime('now', '-14 days')
-    GROUP BY oi.name
-  `).all();
+async function trends() {
+  const rows = await sql.all(TRENDS);
 
   const movers = rows
     .filter((r) => r.recent + r.previous >= 3)   // ignore one-off noise

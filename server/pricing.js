@@ -1,6 +1,6 @@
 'use strict';
 
-const { db } = require('./db');
+const { sql } = require('./db');
 
 /**
  * Every money value in QuickBite is a whole number of rupees held in an INTEGER
@@ -13,10 +13,15 @@ const TAX_PERCENT = 5;
 const SMALL_ORDER_FEE = 20;        // applied below the minimum basket
 const SMALL_ORDER_BELOW = 150;
 
-const findCoupon = db.prepare('SELECT * FROM coupons WHERE code = ? AND is_active = 1');
-const countUserRedemptions = db.prepare(
-  'SELECT COUNT(*) AS n FROM coupon_redemptions WHERE code = ? AND user_id = ?'
-);
+const FIND_COUPON = 'SELECT * FROM coupons WHERE code = $1 AND is_active = 1';
+const COUNT_USER_REDEMPTIONS =
+  'SELECT COUNT(*) AS n FROM coupon_redemptions WHERE code = $1 AND user_id = $2';
+/*
+ * The expiry test is done in SQL rather than in JavaScript so that "now" is
+ * always the database's clock — the same clock that stamped the row — however
+ * far the application server's own clock has drifted.
+ */
+const IS_EXPIRED = 'SELECT (now() > $1::timestamptz) AS expired';
 
 /**
  * Decides whether a coupon may be used right now.
@@ -24,19 +29,20 @@ const countUserRedemptions = db.prepare(
  * @param {string} code      coupon code as typed
  * @param {number} subtotal  basket subtotal in rupees
  * @param {number|null} userId  the signed-in user, or null for a guest quote
- * @returns {{coupon: object|null, error: string|null}}
+ * @param {object} [exec]    a transaction client, when called inside one — so
+ *                           checkout re-validates on the same connection that
+ *                           is about to record the redemption
+ * @returns {Promise<{coupon: object|null, error: string|null}>}
  */
-function validateCoupon(code, subtotal, userId) {
+async function validateCoupon(code, subtotal, userId, exec = sql) {
   const normalized = (code || '').trim().toUpperCase();
   if (!normalized) return { coupon: null, error: null };
 
-  const coupon = findCoupon.get(normalized);
+  const coupon = await exec.get(FIND_COUPON, [normalized]);
   if (!coupon) return { coupon: null, error: `Coupon ${normalized} is not valid.` };
 
   if (coupon.expires_at) {
-    const expired = db
-      .prepare("SELECT datetime('now') > datetime(?) AS expired")
-      .get(coupon.expires_at).expired;
+    const { expired } = await exec.get(IS_EXPIRED, [coupon.expires_at]);
     if (expired) return { coupon: null, error: `Coupon ${normalized} has expired.` };
   }
 
@@ -54,7 +60,7 @@ function validateCoupon(code, subtotal, userId) {
   // A per-account limit can only be judged for a signed-in customer; a guest
   // quote shows the discount and checkout re-checks it for real.
   if (userId && coupon.per_user_limit > 0) {
-    const used = countUserRedemptions.get(normalized, userId).n;
+    const { n: used } = await exec.get(COUNT_USER_REDEMPTIONS, [normalized, userId]);
     if (used >= coupon.per_user_limit) {
       return {
         coupon: null,
@@ -72,7 +78,7 @@ function validateCoupon(code, subtotal, userId) {
  * Prices a set of `{ price, quantity }` lines. This is the only place totals are
  * computed; the client's numbers are never read.
  */
-function priceCart(lines, couponCode, userId = null) {
+async function priceCart(lines, couponCode, userId = null, exec = sql) {
   const subtotal = lines.reduce((sum, l) => sum + l.price * l.quantity, 0);
   const isEmpty = subtotal === 0;
 
@@ -80,7 +86,7 @@ function priceCart(lines, couponCode, userId = null) {
   let deliveryFee = isEmpty || subtotal >= FREE_DELIVERY_ABOVE ? 0 : DELIVERY_FEE;
   const smallOrderFee = !isEmpty && subtotal < SMALL_ORDER_BELOW ? SMALL_ORDER_FEE : 0;
 
-  const { coupon, error } = validateCoupon(couponCode, subtotal, userId);
+  const { coupon, error } = await validateCoupon(couponCode, subtotal, userId, exec);
 
   if (coupon) {
     if (coupon.percent_off > 0) {

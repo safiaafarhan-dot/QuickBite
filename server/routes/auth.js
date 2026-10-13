@@ -1,20 +1,29 @@
 'use strict';
 
 const express = require('express');
-const { db } = require('../db');
+const { sql } = require('../db');
 const { hashPassword, verifyPassword, signToken, requireAuth } = require('../auth');
-const { cleanText, rateLimit, EMAIL_RE, PHONE_RE } = require('../middleware');
+const { cleanText, rateLimit, EMAIL_RE, PHONE_RE, route } = require('../middleware');
 
 const router = express.Router();
 
-const insertUser = db.prepare(
-  'INSERT INTO users (name, email, password_hash, phone, address, role) VALUES (?, ?, ?, ?, ?, ?)'
-);
-const findByEmail = db.prepare('SELECT * FROM users WHERE email = ?');
-const publicUser = db.prepare(
-  'SELECT id, name, email, phone, address, role, created_at FROM users WHERE id = ?'
-);
-const updateProfile = db.prepare('UPDATE users SET name = ?, phone = ?, address = ? WHERE id = ?');
+/*
+ * `ON CONFLICT (email) DO NOTHING` plus `RETURNING id` makes registration a
+ * single statement that cannot race: the old read-then-insert could let two
+ * simultaneous sign-ups both pass the "is this email taken?" check. An empty
+ * result now means the address was taken, and the unique index is what decides
+ * it rather than a check a moment earlier.
+ */
+const INSERT_USER = `
+  INSERT INTO users (name, email, password_hash, phone, address, role)
+  VALUES ($1, $2, $3, $4, $5, $6)
+  ON CONFLICT (email) DO NOTHING
+  RETURNING id
+`;
+const FIND_BY_EMAIL = 'SELECT * FROM users WHERE email = $1';
+const PUBLIC_USER =
+  'SELECT id, name, email, phone, address, role, created_at FROM users WHERE id = $1';
+const UPDATE_PROFILE = 'UPDATE users SET name = $1, phone = $2, address = $3 WHERE id = $4';
 
 /**
  * Credential endpoints are the obvious target for guessing, so they get a much
@@ -53,8 +62,7 @@ function badCredentialTypes(body) {
   return false;
 }
 
-router.post('/register', credentialLimiter, async (req, res, next) => {
-  try {
+router.post('/register', credentialLimiter, route(async (req, res) => {
     if (badCredentialTypes(req.body)) {
       return res.status(400).json({ error: 'Email and password must be text.' });
     }
@@ -74,21 +82,22 @@ router.post('/register', credentialLimiter, async (req, res, next) => {
     if (phone && !PHONE_RE.test(phone)) {
       return res.status(400).json({ error: 'Please enter a valid phone number.' });
     }
-    if (findByEmail.get(email)) return res.status(409).json({ error: 'That email is already registered.' });
+    if (await sql.get(FIND_BY_EMAIL, [email])) {
+      return res.status(409).json({ error: 'That email is already registered.' });
+    }
 
     const hash = await hashPassword(password);
     // Role is never taken from the request body — accounts are always customers.
-    const { lastInsertRowid } = insertUser.run(name, email, hash, phone, address, 'customer');
-    const user = publicUser.get(Number(lastInsertRowid));
+    const inserted = await sql.run(INSERT_USER, [name, email, hash, phone, address, 'customer']);
+    if (inserted.rowCount === 0) {
+      return res.status(409).json({ error: 'That email is already registered.' });
+    }
 
+    const user = await sql.get(PUBLIC_USER, [inserted.row.id]);
     res.status(201).json({ user, token: signToken(user) });
-  } catch (err) {
-    next(err);
-  }
-});
+}));
 
-router.post('/login', credentialLimiter, async (req, res, next) => {
-  try {
+router.post('/login', credentialLimiter, route(async (req, res) => {
     if (badCredentialTypes(req.body)) {
       return res.status(401).json({ error: 'Email or password is incorrect.' });
     }
@@ -96,7 +105,7 @@ router.post('/login', credentialLimiter, async (req, res, next) => {
     const email = cleanText(req.body.email, 160).toLowerCase();
     const password = String(req.body.password || '');
 
-    const row = findByEmail.get(email);
+    const row = await sql.get(FIND_BY_EMAIL, [email]);
 
     // Always run a comparison so a missing account and a wrong password take
     // the same amount of time.
@@ -105,18 +114,15 @@ router.post('/login', credentialLimiter, async (req, res, next) => {
 
     if (!row || !ok) return res.status(401).json({ error: 'Email or password is incorrect.' });
 
-    const user = publicUser.get(row.id);
+    const user = await sql.get(PUBLIC_USER, [row.id]);
     res.json({ user, token: signToken(user) });
-  } catch (err) {
-    next(err);
-  }
-});
+}));
 
 router.get('/me', requireAuth, (req, res) => {
   res.json({ user: req.user });
 });
 
-router.patch('/me', requireAuth, (req, res) => {
+router.patch('/me', requireAuth, route(async (req, res) => {
   const name = cleanText(req.body.name ?? req.user.name, 80);
   const phone = cleanText(req.body.phone ?? req.user.phone ?? '', 20);
   const address = cleanText(req.body.address ?? req.user.address ?? '', 300);
@@ -126,9 +132,9 @@ router.patch('/me', requireAuth, (req, res) => {
     return res.status(400).json({ error: 'Please enter a valid phone number.' });
   }
 
-  updateProfile.run(name, phone, address, req.user.id);
-  res.json({ user: publicUser.get(req.user.id) });
-});
+  await sql.run(UPDATE_PROFILE, [name, phone, address, req.user.id]);
+  res.json({ user: await sql.get(PUBLIC_USER, [req.user.id]) });
+}));
 
 /**
  * Tokens are stateless JWTs held in localStorage, so "logging out" is a client

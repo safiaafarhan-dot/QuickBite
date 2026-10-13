@@ -1,6 +1,6 @@
 'use strict';
 
-const { db } = require('./db');
+const { transaction } = require('./db');
 
 /** Ordered lifecycle. `cancelled` is terminal and lives outside the chain. */
 const FLOW = ['placed', 'confirmed', 'preparing', 'out_for_delivery', 'delivered'];
@@ -63,24 +63,28 @@ const STAGE_AT = {
   delivered: 1,
 };
 
-const selectLive = db.prepare(`
+const SELECT_LIVE = `
   SELECT id, status, eta_minutes, placed_at
   FROM orders
   WHERE auto_advance = 1 AND status NOT IN ('delivered', 'cancelled')
-`);
-const selectLiveOne = db.prepare(`
+`;
+const SELECT_LIVE_ONE = `
   SELECT id, status, eta_minutes, placed_at
   FROM orders
-  WHERE id = ? AND auto_advance = 1 AND status NOT IN ('delivered', 'cancelled')
-`);
-const updateStatus = db.prepare(
-  "UPDATE orders SET status = ?, updated_at = datetime('now') WHERE id = ?"
-);
-const insertEvent = db.prepare('INSERT INTO order_events (order_id, status, note) VALUES (?, ?, ?)');
-const eventExists = db.prepare('SELECT 1 FROM order_events WHERE order_id = ? AND status = ?');
+  WHERE id = $1 AND auto_advance = 1 AND status NOT IN ('delivered', 'cancelled')
+`;
+const UPDATE_STATUS = 'UPDATE orders SET status = $1, updated_at = now() WHERE id = $2';
+const INSERT_EVENT = 'INSERT INTO order_events (order_id, status, note) VALUES ($1, $2, $3)';
+const EVENT_EXISTS = 'SELECT 1 FROM order_events WHERE order_id = $1 AND status = $2';
 
-function minutesSince(sqliteUtcTimestamp) {
-  const placed = Date.parse(`${String(sqliteUtcTimestamp).replace(' ', 'T')}Z`);
+/**
+ * Minutes since a stored UTC timestamp.
+ *
+ * The database layer renders timestamps as `'YYYY-MM-DD HH:MM:SS'` in UTC —
+ * the same shape SQLite stored — so this parses exactly as it always did.
+ */
+function minutesSince(utcTimestamp) {
+  const placed = Date.parse(`${String(utcTimestamp).replace(' ', 'T')}Z`);
   if (Number.isNaN(placed)) return 0;
   return (Date.now() - placed) / 60000;
 }
@@ -95,23 +99,38 @@ function expectedStatus(order) {
   return status;
 }
 
-function advanceOne(order) {
+async function advanceOne(tx, order) {
   const target = expectedStatus(order);
   if (FLOW.indexOf(target) <= FLOW.indexOf(order.status)) return order.status;
 
   // Backfill every stage the order passed through so the timeline stays honest.
   for (let i = FLOW.indexOf(order.status) + 1; i <= FLOW.indexOf(target); i++) {
     const stage = FLOW[i];
-    if (!eventExists.get(order.id, stage)) insertEvent.run(order.id, stage, '');
+    if (!(await tx.get(EVENT_EXISTS, [order.id, stage]))) {
+      await tx.run(INSERT_EVENT, [order.id, stage, '']);
+    }
   }
-  updateStatus.run(target, order.id);
+  await tx.run(UPDATE_STATUS, [target, order.id]);
   return target;
 }
 
-/** Brings every live order (or just one) up to date with the clock. */
-function advanceOrders(orderId) {
-  const rows = orderId ? [selectLiveOne.get(orderId)].filter(Boolean) : selectLive.all();
-  for (const row of rows) advanceOne(row);
+/**
+ * Brings every live order (or just one) up to date with the clock.
+ *
+ * The reads and the writes run in one transaction now. Under SQLite this was a
+ * sequence of statements on the single connection that owned the file; against
+ * a pooled PostgreSQL they could otherwise interleave with a concurrent
+ * request and write a status derived from a row another connection had already
+ * moved on.
+ */
+async function advanceOrders(orderId) {
+  await transaction(async (tx) => {
+    const rows = orderId
+      ? await tx.all(SELECT_LIVE_ONE, [orderId])
+      : await tx.all(SELECT_LIVE);
+
+    for (const row of rows) await advanceOne(tx, row);
+  });
 }
 
 module.exports = {

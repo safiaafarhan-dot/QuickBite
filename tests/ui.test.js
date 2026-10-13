@@ -18,15 +18,28 @@ const path = require('node:path');
 const { JSDOM, VirtualConsole } = require('jsdom');
 
 const {
-  prepareEnvironment, cleanup, makeClient,
+  prepareEnvironment, initTestDb, databaseUnavailable, cleanup, makeClient,
   GOOD_PASSWORD, VALID_ADDRESS, VALID_PHONE,
 } = require('./helpers');
 
-const DB_FILE = prepareEnvironment('ui');
+
+/*
+ * These suites need a real PostgreSQL. Without one they skip loudly rather
+ * than failing or, worse, silently passing — the same contract the browser
+ * suites use when Chrome is unavailable.
+ */
+const unavailable = databaseUnavailable();
+if (unavailable) {
+  console.log(`\n  ⊘ UI tests skipped — ${unavailable}\n`);
+  test('UI suite needs a PostgreSQL test database', { skip: unavailable }, () => {});
+  return;
+}
+
+const SCHEMA = prepareEnvironment('ui');
 
 const app = require('../server/index');
 const { hashPassword } = require('../server/auth');
-const { db } = require('../server/db');
+const { sql } = require('../server/db');
 
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 
@@ -36,22 +49,23 @@ const call = makeClient(() => base);
 const dish = {};
 
 test.before(async () => {
+  await initTestDb();
   server = app.listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
   base = `http://127.0.0.1:${server.address().port}`;
 
-  db.prepare('INSERT INTO users (name, email, password_hash, phone, address, role) VALUES (?, ?, ?, ?, ?, ?)')
-    .run('Uma Patel', 'ui@test.local', await hashPassword(GOOD_PASSWORD), VALID_PHONE, VALID_ADDRESS, 'customer');
-  db.prepare('INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)')
-    .run('Kitchen Admin', 'uiadmin@test.local', await hashPassword('adminpass1'), 'admin');
+  await sql.run(
+    'INSERT INTO users (name, email, password_hash, phone, address, role) VALUES ($1, $2, $3, $4, $5, $6)',
+    ['Uma Patel', 'ui@test.local', await hashPassword(GOOD_PASSWORD), VALID_PHONE, VALID_ADDRESS, 'customer']);
+  await sql.run('INSERT INTO users (name, email, password_hash, role) VALUES ($1, $2, $3, $4)',
+    ['Kitchen Admin', 'uiadmin@test.local', await hashPassword('adminpass1'), 'admin']);
 
-  for (const row of db.prepare('SELECT id, slug, name, price FROM menu_items').all()) dish[row.slug] = row;
+  for (const row of await sql.all('SELECT id, slug, name, price FROM menu_items')) dish[row.slug] = row;
 });
 
-test.after(() => {
+test.after(async () => {
   server?.close();
-  db.close();
-  cleanup(DB_FILE);
+  await cleanup(SCHEMA);
 });
 
 /* ================================================================== */
@@ -103,7 +117,14 @@ async function waitFor(fn, message, timeout = 5000) {
   const deadline = Date.now() + timeout;
   for (;;) {
     let value;
-    try { value = fn(); } catch { value = null; }
+    /*
+     * The predicate is awaited, not just called. Some conditions now have to
+     * ask the database, and an async predicate returns a Promise — which is
+     * always truthy, so an un-awaited call here would report success on the
+     * first tick and let the test run on before the thing it was waiting for
+     * had happened.
+     */
+    try { value = await fn(); } catch { value = null; }
     if (value) return value;
     if (Date.now() > deadline) throw new Error(`Timed out waiting for: ${message}`);
     await new Promise((r) => setTimeout(r, 40));
@@ -380,7 +401,7 @@ test('the recommendation rail renders real dishes', async () => {
   assert.ok(cards.length >= 4);
   assert.match(doc.getElementById('picksExplanation').textContent, /\w/);
 
-  const realNames = new Set(db.prepare('SELECT name FROM menu_items').all().map((r) => r.name));
+  const realNames = new Set((await sql.all('SELECT name FROM menu_items')).map((r) => r.name));
   for (const card of cards) {
     assert.ok(realNames.has(card.querySelector('h3').textContent.trim()), 'every pick is a real dish');
   }
@@ -403,7 +424,7 @@ test('the assistant answers in the panel and its picks can be added', async () =
   await waitFor(() => doc.querySelectorAll('.bubble--bot').length >= 2, 'the answer');
   await waitFor(() => doc.querySelector('.pick'), 'the suggested dishes');
 
-  const realNames = new Set(db.prepare('SELECT name FROM menu_items').all().map((r) => r.name));
+  const realNames = new Set((await sql.all('SELECT name FROM menu_items')).map((r) => r.name));
   for (const pick of doc.querySelectorAll('.pick strong')) {
     assert.ok(realNames.has(pick.textContent.trim()), `invented dish: ${pick.textContent}`);
   }
@@ -540,7 +561,7 @@ test('a delivered order offers a rating dialog that posts a review', async () =>
   const { body } = await call('POST', '/api/orders', {
     token, body: { name: 'Uma Patel', phone: VALID_PHONE, address: VALID_ADDRESS },
   });
-  db.prepare("UPDATE orders SET status = 'delivered', auto_advance = 0 WHERE id = ?").run(body.order.id);
+  await sql.run("UPDATE orders SET status = 'delivered', auto_advance = 0 WHERE id = $1", [body.order.id]);
 
   const { window, doc } = await loadPage('orders.html', { token });
   const rateBtn = await waitFor(
@@ -565,7 +586,7 @@ test('a delivered order offers a rating dialog that posts a review', async () =>
     'the modal to close on success'
   );
 
-  const stored = db.prepare('SELECT * FROM reviews WHERE item_id = ?').get(dish['tiramisu'].id);
+  const stored = await sql.get('SELECT * FROM reviews WHERE item_id = $1', [dish['tiramisu'].id]);
   assert.ok(stored, 'the review reached the database');
   assert.equal(stored.rating, 5);
 
@@ -638,7 +659,7 @@ test('the kitchen can move an order along the lifecycle from the dashboard', asy
   change(window, select);
 
   await waitFor(
-    () => db.prepare('SELECT status FROM orders WHERE id = ?').get(body.order.id).status === 'confirmed',
+    async () => (await sql.get('SELECT status FROM orders WHERE id = $1', [body.order.id])).status === 'confirmed',
     'the status change to persist'
   );
 

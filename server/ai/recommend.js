@@ -17,7 +17,7 @@
  * the live database, so recommendations work offline and cannot leak anything.
  */
 
-const { db } = require('./../db');
+const { sql } = require('./../db');
 
 /** Below this many multi-item orders, co-occurrence is noise rather than signal. */
 const MIN_BASKETS_FOR_CF = 8;
@@ -28,41 +28,44 @@ const WEIGHTS = { popularity: 0.3, content: 0.45, collaborative: 0.25 };
 /** Bayesian prior: pretend every dish starts with this many average-rated sales. */
 const PRIOR_UNITS = 5;
 
-const allAvailable = db.prepare(`
+const ALL_AVAILABLE = `
   SELECT id, slug, name, description, price, image, category, cuisine, tags,
          is_veg, is_popular, rating, prep_minutes, spice_level, calories, stock
   FROM menu_items
   WHERE is_available = 1 AND stock > 0
-`);
+`;
 
-const unitsSold = db.prepare(`
+const UNITS_SOLD = `
   SELECT oi.item_id, SUM(oi.quantity) AS units
   FROM order_items oi JOIN orders o ON o.id = oi.order_id
-  WHERE o.status != 'cancelled' AND oi.item_id IS NOT NULL
+  WHERE o.status <> 'cancelled' AND oi.item_id IS NOT NULL
   GROUP BY oi.item_id
-`);
+`;
 
-const userHistory = db.prepare(`
+const USER_HISTORY = `
   SELECT oi.item_id, SUM(oi.quantity) AS units
   FROM order_items oi JOIN orders o ON o.id = oi.order_id
-  WHERE o.user_id = ? AND o.status != 'cancelled' AND oi.item_id IS NOT NULL
+  WHERE o.user_id = $1 AND o.status <> 'cancelled' AND oi.item_id IS NOT NULL
   GROUP BY oi.item_id
-`);
+`;
 
-const userFavourites = db.prepare('SELECT item_id FROM favorites WHERE user_id = ?');
+const USER_FAVOURITES = 'SELECT item_id FROM favorites WHERE user_id = $1';
 
-const userBrowsing = db.prepare(`
+// `now() - interval '30 days'` replaces SQLite's `datetime('now','-30 days')`.
+const USER_BROWSING = `
   SELECT item_id, COUNT(*) AS hits
   FROM item_events
-  WHERE user_id = ? AND created_at > datetime('now', '-30 days')
+  WHERE user_id = $1 AND created_at > now() - interval '30 days'
   GROUP BY item_id
-`);
+`;
 
-const basketRows = db.prepare(`
+const BASKET_ROWS = `
   SELECT o.id AS order_id, oi.item_id
   FROM orders o JOIN order_items oi ON oi.order_id = o.id
-  WHERE o.status != 'cancelled' AND oi.item_id IS NOT NULL
-`);
+  WHERE o.status <> 'cancelled' AND oi.item_id IS NOT NULL
+`;
+
+const FIND_ITEM = 'SELECT * FROM menu_items WHERE id = $1';
 
 /* ------------------------------------------------------------------ */
 /* Vector helpers                                                      */
@@ -125,8 +128,9 @@ function normalise(scores) {
  * Popularity with a Bayesian prior, so quality and volume both matter and a
  * brand-new dish is not ranked first on the strength of a single order.
  */
-function popularityScores(items) {
-  const sold = new Map(unitsSold.all().map((r) => [r.item_id, r.units]));
+async function popularityScores(items) {
+  const soldRows = await sql.all(UNITS_SOLD);
+  const sold = new Map(soldRows.map((r) => [r.item_id, r.units]));
   const totalUnits = [...sold.values()].reduce((a, b) => a + b, 0);
   const meanRating =
     items.reduce((sum, i) => sum + i.rating, 0) / Math.max(items.length, 1);
@@ -152,15 +156,21 @@ function popularityScores(items) {
  * Builds a taste profile from everything the customer has done — orders weigh
  * most, then favourites, then browsing — and scores each dish against it.
  */
-function contentScores(items, userId) {
+async function contentScores(items, userId) {
   if (!userId) return { scores: new Map(), basedOn: 0 };
 
   const weights = new Map();
   const bump = (itemId, weight) => weights.set(itemId, (weights.get(itemId) || 0) + weight);
 
-  for (const row of userHistory.all(userId)) bump(row.item_id, 3 * Math.min(row.units, 4));
-  for (const row of userFavourites.all(userId)) bump(row.item_id, 2);
-  for (const row of userBrowsing.all(userId)) bump(row.item_id, Math.min(row.hits, 5) * 0.4);
+  const [history, favourites, browsing] = await Promise.all([
+    sql.all(USER_HISTORY, [userId]),
+    sql.all(USER_FAVOURITES, [userId]),
+    sql.all(USER_BROWSING, [userId]),
+  ]);
+
+  for (const row of history) bump(row.item_id, 3 * Math.min(row.units, 4));
+  for (const row of favourites) bump(row.item_id, 2);
+  for (const row of browsing) bump(row.item_id, Math.min(row.hits, 5) * 0.4);
 
   if (weights.size === 0) return { scores: new Map(), basedOn: 0 };
 
@@ -185,8 +195,8 @@ function contentScores(items, userId) {
  * Item-to-item co-occurrence over past baskets, normalised so a globally
  * popular dish is not "similar to everything".
  */
-function collaborativeScores(items, userId) {
-  const rows = basketRows.all();
+async function collaborativeScores(items, userId) {
+  const rows = await sql.all(BASKET_ROWS);
 
   const baskets = new Map();
   for (const row of rows) {
@@ -213,7 +223,7 @@ function collaborativeScores(items, userId) {
     }
   }
 
-  const seeds = userHistory.all(userId).map((r) => r.item_id);
+  const seeds = (await sql.all(USER_HISTORY, [userId])).map((r) => r.item_id);
   if (seeds.length === 0) return { scores: new Map(), baskets: multiItem.length, active: false };
 
   const scores = new Map();
@@ -249,14 +259,14 @@ function collaborativeScores(items, userId) {
  * @param {number[]} options.exclude      item ids to leave out
  * @returns {{items: object[], strategy: string, explanation: string, signals: object}}
  */
-function recommend({
+async function recommend({
   userId = null,
   limit = 6,
   diet = '',
   maxPrice = null,
   exclude = [],
 } = {}) {
-  let items = allAvailable.all();
+  let items = await sql.all(ALL_AVAILABLE);
 
   if (diet === 'veg') items = items.filter((i) => i.is_veg);
   if (diet === 'nonveg') items = items.filter((i) => !i.is_veg);
@@ -274,9 +284,13 @@ function recommend({
     };
   }
 
-  const popularity = popularityScores(items);
-  const content = contentScores(items, userId);
-  const collaborative = collaborativeScores(items, userId);
+  // The three signals are independent, so they are gathered concurrently
+  // rather than one round trip after another.
+  const [popularity, content, collaborative] = await Promise.all([
+    popularityScores(items),
+    contentScores(items, userId),
+    collaborativeScores(items, userId),
+  ]);
 
   // Redistribute the weight of any signal that has no data to work with.
   const active = {
@@ -343,10 +357,10 @@ function recommend({
  * "Goes well with" for a single dish — pure content similarity, so it works
  * from the very first visit with no history at all.
  */
-function similarTo(itemId, { limit = 4 } = {}) {
-  const items = allAvailable.all();
+async function similarTo(itemId, { limit = 4 } = {}) {
+  const items = await sql.all(ALL_AVAILABLE);
   const target = items.find((i) => i.id === Number(itemId))
-    || db.prepare('SELECT * FROM menu_items WHERE id = ?').get(Number(itemId));
+    || await sql.get(FIND_ITEM, [Number(itemId)]);
 
   if (!target) return { items: [] };
 

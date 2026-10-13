@@ -1,0 +1,42 @@
+# Render blueprint for QuickBite.
+#
+# Point Render at this file (New → Blueprint) and it creates the service with
+# the right commands. The secrets are deliberately `sync: false`: Render asks
+# for them once, in the dashboard, so no password or signing key is ever
+# committed to this repository.
+services:
+  - type: web
+    name: quickbite
+    runtime: node
+    plan: free
+    # The repo has no build step; this only installs dependencies.
+    buildCommand: npm ci
+    # No preDeployCommand: Render offers pre-deploy only on paid instance types,
+    # and a blueprint on the free plan is rejected for declaring one. It is not
+    # needed here — `server/index.js` awaits `initDb()` (migrate + reference
+    # seed) before it opens the port, so the schema is in place before the
+    # service takes its first request. That path is idempotent and takes a
+    # transaction-scoped PostgreSQL advisory lock, so two instances starting
+    # during an overlapping deploy cannot race each other.
+    #
+    # On a paid plan, add:  preDeployCommand: npm run migrate
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Render sits in front of the app, so the rate limiter has to look one
+      # hop back to find the real client IP rather than the proxy's.
+      - key: TRUST_PROXY_HOPS
+        value: "1"
+      # Supabase's transaction pooler, from Project Settings → Database.
+      # Use port 6543, not 5432 — see DEPLOYMENT.md §3a.
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: PAYMENT_WEBHOOK_SECRET
+        sync: false
+      # Optional: only changes how the assistant phrases its replies.
+      - key: ANTHROPIC_API_KEY
+        sync: false

@@ -3,6 +3,9 @@
 > **Nothing here has been deployed.** This document describes how to deploy; no
 > hosting account, domain or gateway has been configured, and no deployment has
 > been attempted. Treat every command below as untested against a real host.
+>
+> What *has* been tested is the application itself against a real PostgreSQL 18
+> — the full suite, the migration, the seed and the SQLite import. See §9.
 
 ---
 
@@ -10,16 +13,20 @@
 
 | Requirement | Detail |
 | --- | --- |
-| Runtime | Node **22.5+** (uses the built-in `node:sqlite` module) |
+| Runtime | Node **22.5+** |
 | Build step | None — Express serves the static front end directly |
-| Persistent disk | **Required.** The database is a file; without a persistent volume every redeploy wipes all orders and accounts |
-| Processes | **One.** Rate limiting is in-process and SQLite has a single writer |
-| Outbound network | Only if `ANTHROPIC_API_KEY` is set |
+| Database | **PostgreSQL 13+**, reached over the network via `DATABASE_URL` |
+| Persistent disk | **None.** The container is stateless; everything lives in PostgreSQL |
+| Processes | One is recommended — see the note below |
+| Outbound network | PostgreSQL, plus Anthropic only if `ANTHROPIC_API_KEY` is set |
 
-That last pair matters most. QuickBite is a single-process, file-backed
-application. It fits a small VPS, a container with a volume, or a platform that
-offers persistent disks — and it does **not** fit a platform that runs multiple
-stateless replicas on ephemeral filesystems without changes (see §6).
+The app writes nothing to its own filesystem, so it fits a free, ephemeral
+container host perfectly well. Running more than one instance is now *safe*
+(PostgreSQL has no single-writer limit, and the schema migration takes an
+advisory lock so two instances deploying at once cannot race). The only thing
+that degrades is rate limiting, which is counted per process: two instances
+means roughly twice the configured ceiling. Lower `API_RATE_LIMIT_MAX`
+accordingly, or keep one instance.
 
 ---
 
@@ -29,109 +36,205 @@ Copy `.env.example` to `.env` and fill it in. The variables that actually matter
 
 | Variable | Default | Notes |
 | --- | --- | --- |
-| `JWT_SECRET` | *(none)* | **The server refuses to start with `NODE_ENV=production` unless this is set.** Generate with `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"` |
+| `DATABASE_URL` | *(none)* | **Required. The server refuses to start without it.** |
+| `JWT_SECRET` | *(none)* | **Required when `NODE_ENV=production`.** Generate with `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"` |
 | `NODE_ENV` | `development` | `production` enables HSTS and hides stack traces |
-| `PORT` | `3000` | |
-| `DB_FILE` | `./data/quickbite.db` | Point at the persistent volume |
-| `TRUST_PROXY_HOPS` | `0` | Set to `1` behind one reverse proxy, so rate limiting sees the real client IP rather than the proxy's |
+| `PORT` | `3000` | Render injects this; the server honours it |
+| `TRUST_PROXY_HOPS` | `0` | **Set to `1` on Render**, so rate limiting sees the real client IP rather than the proxy's |
 | `PAYMENT_WEBHOOK_SECRET` | *(none)* | Without it the payment webhook rejects everything with 503 |
+| `PGPOOL_MAX` | `8` | Connection pool ceiling |
+| `PGSSL_STRICT` | `0` | `1` to verify the database's certificate properly (needs `PGSSLROOTCERT`) |
 | `ANTHROPIC_API_KEY` | *(none)* | Optional. Without it the assistant uses its built-in rules |
 
 Rotating `JWT_SECRET` signs every existing session out. That is the intended way
 to revoke all tokens, since the tokens themselves are stateless.
 
----
-
-## 3. First deploy
-
-```bash
-git clone <your-repo> quickbite && cd quickbite
-npm ci --omit=dev
-
-cp .env.example .env
-# edit .env: set JWT_SECRET, PAYMENT_WEBHOOK_SECRET, NODE_ENV=production, DB_FILE
-
-npm run migrate          # creates and migrates the database
-npm run seed:accounts    # demo accounts only — omit for a real deployment
-NODE_ENV=production npm start
-```
-
-Then smoke-test (§5).
-
-For a real deployment, **do not** run `npm run seed`: it generates 45 days of
-synthetic orders. Create your admin account directly instead:
-
-```bash
-node -e "
-const { db } = require('./server/db');
-const { hashPassword } = require('./server/auth');
-hashPassword(process.env.ADMIN_PASSWORD).then(h => {
-  db.prepare('INSERT INTO users (name,email,password_hash,role) VALUES (?,?,?,?)')
-    .run('Owner', process.env.ADMIN_EMAIL, h, 'admin');
-  console.log('admin created');
-});"
-```
-
-…with `ADMIN_EMAIL` and `ADMIN_PASSWORD` set in the environment, so the password
-never appears in your shell history.
+**Never commit a filled-in `DATABASE_URL`.** It contains the database password.
 
 ---
 
-## 4. Subsequent deploys
+## 3. Free deployment: Render + Supabase
 
-Migrations are forward-only, additive, and safe to re-run. The order matters:
+This is the ₹0/month path. Both tiers are genuinely free; neither asks for a
+card.
+
+### 3a. Create the database (Supabase)
+
+1. supabase.com → **New project**. Pick a region near your users and set a
+   strong database password — you will not be shown it again.
+2. **Project Settings → Database → Connection string → Transaction**.
+3. Copy that URI and replace `[YOUR-PASSWORD]` with the password you set.
+
+It looks like:
+
+```
+postgresql://postgres.abcdefghijkl:PASSWORD@aws-0-ap-south-1.pooler.supabase.com:6543/postgres
+```
+
+**Use the Transaction pooler on port 6543, not the direct connection on 5432.**
+The free tier caps how many server-side connections you may hold open, and the
+pooler is what keeps a restarting web service from exhausting it.
+
+> Supabase pauses a free project after a week with no activity. It resumes on
+> the next connection, but the first request after a pause is slow. If the
+> project stays paused long enough Supabase will eventually delete it — keep a
+> backup (§7).
+
+### 3b. Create the web service (Render)
+
+1. render.com → **New → Web Service**, connect the GitHub repository.
+2. Runtime **Node**, Build command `npm ci`, Start command `npm start`.
+3. Instance type **Free**.
+4. Add the environment variables from §2. At minimum:
+
+   | Key | Value |
+   | --- | --- |
+   | `DATABASE_URL` | the Supabase URI from 3a |
+   | `JWT_SECRET` | a fresh 48-byte random hex string |
+   | `PAYMENT_WEBHOOK_SECRET` | another random string |
+   | `NODE_ENV` | `production` |
+   | `TRUST_PROXY_HOPS` | `1` |
+
+   `PORT` is injected by Render — do not set it yourself.
+
+5. Deploy.
+
+The repository includes `render.yaml`, so you can instead point Render at the
+blueprint and it will create the service with the right commands; it still asks
+you for the secret values, which is the point — they are marked `sync: false`
+so they never live in git.
+
+### 3c. Create the schema
+
+Migrations run automatically before the server accepts traffic: `server/index.js`
+awaits `initDb()` — which applies migrations and loads the reference menu —
+before it opens the port. The Docker image also runs `scripts/migrate.js` from
+its `CMD` first.
+
+> Render's `preDeployCommand` is **not** used, because Render offers pre-deploy
+> only on paid instance types and rejects a free-plan blueprint that declares
+> one. Boot-time migration covers the free plan; on a paid plan you can add
+> `preDeployCommand: npm run migrate` to `render.yaml` to migrate before the
+> new instance takes traffic.
+
+To migrate by hand from your own machine:
+
+```bash
+export DATABASE_URL='postgresql://...'   # the Supabase URI
+npm run migrate            # create/update the schema and load the 30-dish menu
+npm run migrate:status     # report only, changes nothing
+npm run seed               # OPTIONAL: demo accounts + 45 days of fake orders
+```
+
+All three are safe to run repeatedly. `migrate` applies each migration at most
+once and takes an advisory lock so two deploys cannot race; `seed` skips
+anything it already created.
+
+> Run `npm run seed` only if you want the demo data. It inserts clearly-marked
+> synthetic orders (codes begin `QB-D`) so the analytics dashboard has
+> something to show. Do not run it on a database holding real orders.
+
+### 3d. Free-tier realities
+
+- **Render Free sleeps after 15 minutes of inactivity.** The next request takes
+  roughly 30–60 seconds while it wakes. This is the single most noticeable
+  thing about the free tier.
+- **Render Free gives 750 instance-hours a month**, enough for one service
+  running continuously.
+- **Supabase Free gives 500 MB.** QuickBite's schema is tiny; the 286-order
+  demo database is well under 5 MB.
+- A keep-alive pinger defeats the sleep but burns your instance hours and
+  Supabase's activity allowance. It is usually not worth it.
+
+---
+
+## 4. Migrating existing SQLite data
+
+If you already ran QuickBite on SQLite and want to keep those orders:
+
+```bash
+export DATABASE_URL='postgresql://...'
+
+# 1. Look before you leap. This writes nothing.
+node scripts/import-sqlite.js ./data/quickbite.db
+
+# 2. Do it.
+node scripts/import-sqlite.js ./data/quickbite.db --write
+```
+
+The importer:
+
+- opens the SQLite file **read-only** and never modifies it;
+- copies users, orders, order items and events, addresses, reviews, coupon
+  redemptions, idempotency keys, payment events and browsing events;
+- **keeps the original primary keys**, so every foreign key still resolves, and
+  resets each identity sequence afterwards so the next insert does not collide;
+- **does not copy the menu or the coupons.** Those are reference data, rebuilt
+  from `server/data/menu.js` on every boot. Instead it **remaps every
+  `item_id` by dish name**, because a freshly seeded menu need not be numbered
+  the way an old SQLite file was. Copying those ids verbatim would silently
+  re-point historical orders at the wrong dishes — every figure in the
+  dashboard would still add up, and every one would be wrong;
+- treats SQLite's timestamps as UTC and says so explicitly, so nothing shifts
+  by your server's offset;
+- runs as **one transaction** — a failure leaves the target untouched;
+- **refuses to import into a table that already holds rows** unless you pass
+  `--force`, so it cannot quietly double an earlier run.
+
+Afterwards, check the row counts and spot-check an old order in the UI. Keep
+the `.db` file until you are satisfied.
+
+---
+
+## 5. Subsequent deploys
 
 ```bash
 git pull
 npm ci --omit=dev
-npm run migrate -- --backup   # copies the database, then applies what is pending
-                              # restart the process (systemd / Docker / pm2)
+npm run migrate      # idempotent; applies anything new
+# restart the service
 ```
 
-`npm run migrate -- --status` reports what is applied and what is pending
-without changing anything.
+On Render this is just a push: the build command reinstalls, the service
+restarts, and the new instance migrates during boot before it opens the port.
 
-**Rollback.** Migrations have no `down` step by design — reversing a schema
-change on live data is where people lose data. To roll back, restore the backup
-`migrate --backup` wrote and redeploy the previous code:
-
-```bash
-systemctl stop quickbite
-cp data/quickbite.db.2025-01-01T00-00-00-000Z.bak data/quickbite.db
-git checkout <previous-tag> && npm ci --omit=dev
-systemctl start quickbite
-```
+Migrations are forward-only and additive. None of them drops or rewrites a
+table holding user data.
 
 ---
 
-## 5. Smoke test
+## 6. Smoke test
 
 Run these against the deployed URL. Each should behave exactly as described.
 
 ```bash
-BASE=https://your-host
+BASE=https://your-service.onrender.com
 
 # 1. The service is up AND the database answers.
 curl -s $BASE/api/health
 #    expect: {"ok":true,"status":"healthy","migrations":8,"menu_items":30,...}
+#    "database" names the host and database, never the password.
 
 # 2. The menu loads.
 curl -s "$BASE/api/menu" | head -c 200
 
-# 3. Security headers are present.
+# 3. Search is case-insensitive (it uses ILIKE).
+curl -s "$BASE/api/menu?q=BIRYANI" | head -c 120
+
+# 4. Security headers are present.
 curl -sI $BASE/ | grep -Ei 'content-security-policy|x-frame-options|x-content-type'
 
-# 4. The server does not advertise itself.
+# 5. The server does not advertise itself.
 curl -sI $BASE/ | grep -i 'x-powered-by'     # expect: no output
 
-# 5. Protected routes are closed.
+# 6. Protected routes are closed.
 curl -s -o /dev/null -w '%{http_code}\n' $BASE/api/orders        # expect 401
 curl -s -o /dev/null -w '%{http_code}\n' $BASE/api/admin/stats   # expect 401
 
-# 6. The front end is served.
+# 7. The front end is served.
 curl -s $BASE/ | grep -c QuickBite            # expect a non-zero count
 
-# 7. A dish photo loads.
+# 8. A dish photo loads.
 curl -s -o /dev/null -w '%{http_code}\n' $BASE/images/dishes/margherita-pizza.jpg
 ```
 
@@ -140,143 +243,85 @@ the order advance on `/orders.html`.
 
 ---
 
-## 6. Platform notes
+## 7. Backups
 
-### A VPS with systemd — the straightforward option
+The database is no longer a file you can copy, which is the one real cost of
+this move. Supabase takes daily backups on the free tier; take your own before
+anything risky:
 
-```ini
-# /etc/systemd/system/quickbite.service
-[Unit]
-Description=QuickBite
-After=network.target
+```bash
+# A full logical backup. Restores with psql.
+pg_dump "$DATABASE_URL" > quickbite-$(date +%F).sql
 
-[Service]
-Type=simple
-User=quickbite
-WorkingDirectory=/srv/quickbite
-EnvironmentFile=/srv/quickbite/.env
-ExecStartPre=/usr/bin/node scripts/migrate.js
-ExecStart=/usr/bin/node server/index.js
-Restart=on-failure
-RestartSec=5
-
-# The app only ever needs to write to its own data directory.
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ReadWritePaths=/srv/quickbite/data
-
-[Install]
-WantedBy=multi-user.target
+# Restore into an empty database.
+psql "$NEW_DATABASE_URL" < quickbite-2026-01-01.sql
 ```
 
-Put nginx or Caddy in front for TLS, and set `TRUST_PROXY_HOPS=1`.
+`npm run migrate -- --backup` has been **removed**: it copied a file, and there
+is no file. The command refuses with the `pg_dump` line above rather than
+pretending to have worked.
+
+Keep backups off the host, and test a restore at least once — an untested
+backup is a guess.
+
+---
+
+## 8. Other platforms
 
 ### Docker
 
 ```bash
 docker build -t quickbite .
-docker run -d --name quickbite \
-  -p 3000:3000 \
-  -v quickbite-data:/app/data \
+docker run -d --name quickbite -p 3000:3000 \
+  -e DATABASE_URL='postgresql://...' \
+  -e JWT_SECRET='...' \
+  -e PAYMENT_WEBHOOK_SECRET='...' \
   -e NODE_ENV=production \
-  -e JWT_SECRET="$(node -e 'console.log(require("crypto").randomBytes(48).toString("hex"))')" \
-  -e PAYMENT_WEBHOOK_SECRET="$(node -e 'console.log(require("crypto").randomBytes(32).toString("hex"))')" \
   quickbite
 ```
 
-The named volume is not optional. Without `-v`, the database lives inside the
-container's writable layer and disappears when the container is replaced.
+No volume, and no `VOLUME` line in the Dockerfile any more. The container holds
+no state, so it can be replaced, scaled or moved without losing an order.
 
-### Platforms with persistent disks
+### Fly.io, Railway, a VPS
 
-Fly.io, Render, Railway and similar work well **provided** you attach a volume
-and keep the instance count at one:
+All work the same way: set `DATABASE_URL`, run `npm run migrate`, start the
+process. A persistent disk is no longer needed anywhere.
 
-- mount the volume at `/app/data` and set `DB_FILE=/app/data/quickbite.db`
-- scale to exactly 1 instance
-- set `TRUST_PROXY_HOPS=1`
+### Serverless / multi-replica
 
-### Serverless / multi-replica platforms
-
-Vercel, Netlify Functions, Cloud Run with `min=0`, and any autoscaled setup are
-**not** suitable as-is, for three concrete reasons:
-
-1. **The filesystem is ephemeral**, so the database vanishes between invocations.
-2. **SQLite allows one writer**, so two replicas would corrupt or lock each other.
-3. **Rate limiting is in-process**, so each replica would enforce its own
-   separate budget — multiplying the effective limit by the replica count.
-
-Making QuickBite multi-replica means changing all three: move the database to a
-networked engine (Postgres), move rate-limit counters to Redis, and move the
-idempotency table along with the database. The SQL in this project is plain
-enough that a Postgres port is mostly mechanical, but it is a real migration, not
-a configuration flag.
+Now viable, with one caveat: rate limiting is per-process, so N replicas means
+N times the configured ceiling. Divide `API_RATE_LIMIT_MAX` and
+`AUTH_RATE_LIMIT_MAX` by the replica count, or move the limiter to a shared
+store.
 
 ---
 
-## 7. Backups
+## 9. What was actually verified
 
-The whole database is one file, so backing it up is a copy — but it must be a
-*consistent* copy, which `cp` does not guarantee while the server is writing.
-Use SQLite's own backup command:
+Against a real PostgreSQL 18.4 (not a mock, not an emulator):
 
-```bash
-# Daily, via cron. Safe to run against a live database.
-sqlite3 /srv/quickbite/data/quickbite.db \
-  ".backup '/srv/backups/quickbite-$(date +%F).db'"
+- the full test suite — **182 tests, 182 passing, 0 skipped**;
+- `npm run migrate` on an empty database, and again (idempotent);
+- `npm run seed`, and again (no duplicate users, orders or coupons);
+- `node scripts/import-sqlite.js --write` against a real 286-order SQLite
+  file: 2,419 rows, zero dangling references, zero mis-pointed dish lines;
+- the server booting and serving the real API: menu, search, cart, checkout,
+  orders, admin stats, analytics, forecast, recommender, assistant.
 
-find /srv/backups -name 'quickbite-*.db' -mtime +30 -delete
-```
-
-Restore by stopping the service, copying the backup over `quickbite.db`,
-deleting any stale `-wal` and `-shm` files, and starting again.
-
-Verify a backup occasionally — an untested backup is a guess:
-
-```bash
-sqlite3 /srv/backups/quickbite-2025-01-01.db \
-  "PRAGMA integrity_check; SELECT COUNT(*) FROM orders;"
-```
+Not verified: Supabase and Render themselves. Nothing has been deployed.
 
 ---
 
-## 8. Operating it
+## 10. Before going live — checklist
 
-**Logs.** One JSON object per request on stdout:
-
-```json
-{"t":"2025-01-01T12:00:00.000Z","id":"...","method":"GET","path":"/api/menu","status":200,"ms":4,"user":12}
-```
-
-No request bodies, headers, passwords or tokens are logged. Errors add a
-`level:"error"` line carrying the same request `id`, which is also returned to
-the client as `request_id` — so a user-reported failure can be traced to one log
-line without them sending you anything sensitive.
-
-Pipe stdout to your log collector; with systemd, `journalctl -u quickbite -f`.
-
-**Health.** `GET /api/health` runs a real query, so it returns 503 if the
-database is unreachable rather than falsely reporting healthy.
-
-**Payments.** Point your gateway's webhook at `POST /api/payments/webhook` and
-set `PAYMENT_WEBHOOK_SECRET` to the signing secret it gives you. The handler
-verifies an HMAC-SHA256 signature over the raw body, rejects amount mismatches,
-and ignores replays. To use a provider other than the sandbox, replace
-`verifySignature` in `server/routes/payments.js` with that provider's scheme —
-the surrounding order-state logic does not change.
-
----
-
-## 9. Before going live — checklist
-
-- [ ] `JWT_SECRET` and `PAYMENT_WEBHOOK_SECRET` set to long random values, not the examples
+- [ ] `DATABASE_URL` set, and **not** committed anywhere
+- [ ] `JWT_SECRET` set to a fresh 48-byte random value
+- [ ] `PAYMENT_WEBHOOK_SECRET` set
 - [ ] `NODE_ENV=production`
-- [ ] `DB_FILE` pointing at a **persistent** volume
-- [ ] `TRUST_PROXY_HOPS` matching the actual proxy depth
-- [ ] TLS terminating in front of the app
-- [ ] A real admin account created; demo accounts **not** seeded
-- [ ] Backups scheduled *and* one restore rehearsed
-- [ ] `npm run audit:deps` clean
-- [ ] Smoke test (§5) passing against the deployed URL
-- [ ] Instance count is exactly 1
+- [ ] `TRUST_PROXY_HOPS=1` behind Render's proxy
+- [ ] `npm run migrate` run, `/api/health` reports `migrations: 8`
+- [ ] HTTPS in front (Render terminates TLS for you)
+- [ ] A backup taken, and a restore tested
+- [ ] Smoke test in §6 passes
+- [ ] Demo seed **not** run on a database holding real orders

@@ -20,7 +20,45 @@ const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
 
+const { databaseUnavailable } = require('./helpers');
+
 const ENTRY = path.join(__dirname, '..', 'server', 'index.js');
+
+/*
+ * Most of this file is about what the process prints before it ever reaches
+ * the database, so it needs no PostgreSQL at all. The two cases that assert a
+ * *successful* boot do, and they skip loudly without one.
+ */
+const DB_URL = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL || '';
+const skipWithoutDb = () =>
+  (DB_URL ? {} : { skip: 'no test database — set TEST_DATABASE_URL to run the boot tests' });
+
+/**
+ * A connection string plus a schema of this test's own, so a spawned server
+ * migrates into its own corner and never collides with a suite running
+ * alongside it.
+ */
+function dbEnv(label) {
+  return {
+    DATABASE_URL: DB_URL,
+    DB_SCHEMA: `qb_startup_${label}_${process.pid}`.toLowerCase(),
+  };
+}
+
+/** Removes a schema a spawned server created. Best effort; never fails a test. */
+async function dropSchema(schema) {
+  if (!DB_URL || !schema) return;
+  const { Client } = require('pg');
+  const client = new Client({ connectionString: DB_URL });
+  try {
+    await client.connect();
+    await client.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
+  } catch {
+    /* a leftover test schema is harmless */
+  } finally {
+    await client.end().catch(() => {});
+  }
+}
 
 /**
  * Runs the server until it prints something conclusive, then kills it.
@@ -112,13 +150,27 @@ async function freePort() {
 
 /* ================================================================== */
 
-test('a busy port is reported in plain language, not as a stack trace', async () => {
+/*
+ * This one needs a database even though it is about the port: the boot has to
+ * get all the way past `initDb()` to reach `listen` and fail there. Without a
+ * connection string the process exits earlier, on the missing DATABASE_URL,
+ * and the assertion below fails for a reason that has nothing to do with the
+ * port — so it skips loudly like the other database-backed cases rather than
+ * reporting a false failure.
+ */
+test('a busy port is reported in plain language, not as a stack trace', skipWithoutDb(), async () => {
   const { port, blocker } = await occupyPort();
+  /*
+   * This boot gets far enough to migrate before `listen` fails, so it leaves a
+   * schema behind like the successful cases do — and left unswept they pile up
+   * one per run.
+   */
+  const env = dbEnv('busy');
 
   try {
     const result = await startServer({
       PORT: String(port),
-      DB_FILE: path.join(os.tmpdir(), `qb-startup-${process.pid}-busy.db`),
+      ...env,
       NODE_ENV: 'development',
     });
 
@@ -131,6 +183,7 @@ test('a busy port is reported in plain language, not as a stack trace', async ()
     assert.doesNotMatch(result.output, /at Server\.setupListenHandle/, 'a stack trace leaked');
   } finally {
     blocker.close();
+    await dropSchema(env.DB_SCHEMA);
   }
 });
 
@@ -138,7 +191,7 @@ test('production refuses to start without JWT_SECRET, and says why', async () =>
   const result = await startServer({
     NODE_ENV: 'production',
     PORT: String(await freePort()),
-    DB_FILE: path.join(os.tmpdir(), `qb-startup-${process.pid}-nosecret.db`),
+    ...dbEnv('nosecret'),
     JWT_SECRET: '',
   });
 
@@ -151,13 +204,13 @@ test('production refuses to start without JWT_SECRET, and says why', async () =>
   assert.doesNotMatch(result.output, /throw er/, 'an unhandled throw leaked');
 });
 
-test('production starts normally once JWT_SECRET is supplied', async () => {
-  const dbFile = path.join(os.tmpdir(), `qb-startup-${process.pid}-ok.db`);
+test('production starts normally once JWT_SECRET is supplied', skipWithoutDb(), async () => {
+  const env = dbEnv('ok');
 
   const result = await startServer({
     NODE_ENV: 'production',
     PORT: String(await freePort()),
-    DB_FILE: dbFile,
+    ...env,
     JWT_SECRET: 'a-test-only-secret-that-is-long-enough',
     PAYMENT_WEBHOOK_SECRET: 'test-webhook-secret',
   }, { waitForExit: false });
@@ -166,27 +219,63 @@ test('production starts normally once JWT_SECRET is supplied', async () => {
   assert.match(result.output, /QuickBite running at/, 'the server should have started');
   assert.doesNotMatch(result.output, /Refusing to start/);
 
-  for (const suffix of ['', '-wal', '-shm']) {
-    try { fs.rmSync(`${dbFile}${suffix}`, { force: true }); } catch { /* best effort */ }
-  }
+  await dropSchema(env.DB_SCHEMA);
 });
 
-test('an unset payment webhook secret warns in production but does not block boot', async () => {
-  const dbFile = path.join(os.tmpdir(), `qb-startup-${process.pid}-nowebhook.db`);
-
+/*
+ * The counterpart to the JWT_SECRET check: the server now needs somewhere to
+ * keep its data, and should say so in the same plain language rather than
+ * failing somewhere inside the driver.
+ */
+test('a missing DATABASE_URL is explained, not thrown', async () => {
   const result = await startServer({
-    NODE_ENV: 'production',
+    NODE_ENV: 'development',
     PORT: String(await freePort()),
-    DB_FILE: dbFile,
+    DATABASE_URL: '',
     JWT_SECRET: 'a-test-only-secret-that-is-long-enough',
-    PAYMENT_WEBHOOK_SECRET: '',
-  }, { waitForExit: false });
+  });
 
-  assert.equal(result.timedOut, false, `the server never printed anything: ${result.output}`);
-  assert.match(result.output, /PAYMENT_WEBHOOK_SECRET is unset/, 'the operator is warned');
-  assert.match(result.output, /QuickBite running at/, 'but the shop still opens');
+  assert.equal(result.code, 1, 'the process must refuse to start');
+  assert.match(result.output, /DATABASE_URL/, 'the missing variable is named');
+  assert.match(result.output, /postgres/i, 'the operator is told what it wants');
 
-  for (const suffix of ['', '-wal', '-shm']) {
-    try { fs.rmSync(`${dbFile}${suffix}`, { force: true }); } catch { /* best effort */ }
-  }
+  assert.doesNotMatch(result.output, /^\s+at .*\(.*:\d+:\d+\)$/m, 'a stack trace leaked');
 });
+
+/*
+ * A connection string that parses but points nowhere must also be a readable
+ * message. On Render a stale password or a paused database is exactly this
+ * case, and a raw ECONNREFUSED in the deploy log helps nobody.
+ */
+test('an unreachable database is reported in plain language', async () => {
+  const result = await startServer({
+    NODE_ENV: 'development',
+    PORT: String(await freePort()),
+    // Port 1 is reserved and nothing listens there.
+    DATABASE_URL: 'postgresql://nobody:nothing@127.0.0.1:1/quickbite',
+    JWT_SECRET: 'a-test-only-secret-that-is-long-enough',
+  });
+
+  assert.equal(result.code, 1, 'the process should exit non-zero');
+  assert.match(result.output, /Could not reach the database/i, 'the operator is told what failed');
+  assert.doesNotMatch(result.output, /UnhandledPromiseRejection/, 'an unhandled rejection leaked');
+});
+
+test('an unset payment webhook secret warns in production but does not block boot',
+  skipWithoutDb(), async () => {
+    const env = dbEnv('nowebhook');
+
+    const result = await startServer({
+      NODE_ENV: 'production',
+      PORT: String(await freePort()),
+      ...env,
+      JWT_SECRET: 'a-test-only-secret-that-is-long-enough',
+      PAYMENT_WEBHOOK_SECRET: '',
+    }, { waitForExit: false });
+
+    assert.equal(result.timedOut, false, `the server never printed anything: ${result.output}`);
+    assert.match(result.output, /PAYMENT_WEBHOOK_SECRET is unset/, 'the operator is warned');
+    assert.match(result.output, /QuickBite running at/, 'but the shop still opens');
+
+    await dropSchema(env.DB_SCHEMA);
+  });

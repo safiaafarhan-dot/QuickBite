@@ -26,12 +26,25 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
-const { prepareEnvironment, cleanup } = require('./helpers');
+const { prepareEnvironment, initTestDb, databaseUnavailable, cleanup } = require('./helpers');
 
-const DB_FILE = prepareEnvironment('cinematic');
+
+/*
+ * These suites need a real PostgreSQL. Without one they skip loudly rather
+ * than failing or, worse, silently passing — the same contract this file
+ * already uses when Chrome is unavailable.
+ */
+const dbUnavailable = databaseUnavailable();
+if (dbUnavailable) {
+  console.log(`\n  ⊘ Cinematic tests skipped — ${dbUnavailable}\n`);
+  test('Cinematic suite needs a PostgreSQL test database', { skip: dbUnavailable }, () => {});
+  return;
+}
+
+const SCHEMA = prepareEnvironment('cinematic');
 
 const app = require('../server/index');
-const { db } = require('../server/db');
+const { sql } = require('../server/db');
 
 /* ------------------------------------------------------------------ */
 /* Availability                                                        */
@@ -51,6 +64,7 @@ let base;
 let browser;
 
 test.before(async () => {
+  await initTestDb();
   server = app.listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
   base = `http://127.0.0.1:${server.address().port}`;
@@ -62,11 +76,11 @@ test.before(async () => {
    * dishes gives the carousel something true to show, and exercises
    * the round-robin that stops one name repeating down the rail.
    */
-  const items = db.prepare('SELECT id FROM menu_items ORDER BY id LIMIT 4').all();
-  const insertUser = db.prepare('INSERT INTO users (name, email, password_hash) VALUES (?, ?, ?)');
-  const insertReview = db.prepare(
-    'INSERT INTO reviews (user_id, item_id, rating, comment) VALUES (?, ?, ?, ?)'
-  );
+  const items = await sql.all('SELECT id FROM menu_items ORDER BY id LIMIT 4');
+  const INSERT_USER =
+    'INSERT INTO users (name, email, password_hash) VALUES ($1, $2, $3) RETURNING id';
+  const INSERT_REVIEW =
+    'INSERT INTO reviews (user_id, item_id, rating, comment) VALUES ($1, $2, $3, $4)';
 
   const voices = [
     ['Review One', 'Arrived hot and exactly as described.'],
@@ -74,14 +88,14 @@ test.before(async () => {
     ['Review Three', 'Ordered it twice in a week, which says enough.'],
   ];
 
-  voices.forEach(([name, comment], v) => {
-    const { lastInsertRowid } = insertUser.run(name, `review${v}@test.local`, 'x');
+  for (const [v, [name, comment]] of voices.entries()) {
+    const { row } = await sql.run(INSERT_USER, [name, `review${v}@test.local`, 'x']);
     // Two dishes each, so the rail has to alternate between authors.
     for (const offset of [0, 1]) {
       const item = items[(v + offset * 2) % items.length];
-      if (item) insertReview.run(lastInsertRowid, item.id, 4 + (v % 2), comment);
+      if (item) await sql.run(INSERT_REVIEW, [row.id, item.id, 4 + (v % 2), comment]);
     }
-  });
+  }
 
   if (chromium) {
     try {
@@ -99,8 +113,7 @@ test.before(async () => {
 test.after(async () => {
   await browser?.close();
   server?.close();
-  db.close();
-  cleanup(DB_FILE);
+  await cleanup(SCHEMA);
 });
 
 const skipIf = () => (unavailable ? { skip: unavailable } : {});

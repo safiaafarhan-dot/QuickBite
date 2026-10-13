@@ -2,7 +2,7 @@
 
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { db } = require('./db');
+const { sql } = require('./db');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'quickbite-dev-secret-change-me';
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
@@ -20,9 +20,8 @@ function signToken(user) {
   });
 }
 
-const findUserById = db.prepare(
-  'SELECT id, name, email, phone, address, role, created_at FROM users WHERE id = ?'
-);
+const FIND_USER_BY_ID =
+  'SELECT id, name, email, phone, address, role, created_at FROM users WHERE id = $1';
 
 function readToken(req) {
   const header = req.get('authorization') || '';
@@ -30,13 +29,21 @@ function readToken(req) {
   return null;
 }
 
-/** Populates req.user when a valid token is present. Never rejects. */
-function attachUser(req, _res, next) {
+/**
+ * Populates req.user when a valid token is present. Never rejects.
+ *
+ * Asynchronous now that the user lookup is a round trip to PostgreSQL, so it
+ * calls `next()` from the promise rather than returning. The catch still
+ * swallows everything on purpose: a bad token means "guest", and so does a
+ * database hiccup — the endpoints that actually require an account answer 401
+ * on their own.
+ */
+async function attachUser(req, _res, next) {
   const token = readToken(req);
   if (token) {
     try {
       const payload = jwt.verify(token, JWT_SECRET);
-      const user = findUserById.get(Number(payload.sub));
+      const user = await sql.get(FIND_USER_BY_ID, [Number(payload.sub)]);
       if (user) req.user = user;
     } catch {
       /* invalid or expired token -> treated as a guest */

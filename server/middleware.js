@@ -148,7 +148,18 @@ function toPositiveInt(value, { max = Number.MAX_SAFE_INTEGER } = {}) {
   return n;
 }
 
+/**
+ * Wraps an async route handler so a rejected promise reaches Express.
+ *
+ * Express 4 only forwards errors passed to `next()` or thrown synchronously; a
+ * handler that returns a rejected promise would otherwise surface as an
+ * unhandled rejection and the client would hang until it timed out. Every
+ * handler that awaits the database is wrapped in this.
+ */
+const route = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
 module.exports = {
+  route,
   securityHeaders,
   rateLimit,
   requestLogger,

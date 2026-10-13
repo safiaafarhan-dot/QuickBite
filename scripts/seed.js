@@ -13,7 +13,7 @@
  * do not run it in production.
  */
 
-const { db, transaction } = require('../server/db');
+const { sql, transaction, initDb, closeDb } = require('../server/db');
 const { hashPassword } = require('../server/auth');
 
 const DEMO_USERS = [
@@ -69,15 +69,10 @@ function makeCode(n) {
 }
 
 async function ensureUsers() {
-  const findByEmail = db.prepare('SELECT id, role FROM users WHERE email = ?');
-  const insertUser = db.prepare(
-    'INSERT INTO users (name, email, password_hash, phone, address, role) VALUES (?, ?, ?, ?, ?, ?)'
-  );
-
   const users = [];
 
   for (const user of DEMO_USERS) {
-    const existing = findByEmail.get(user.email);
+    const existing = await sql.get('SELECT id, role FROM users WHERE email = $1', [user.email]);
     if (existing) {
       console.log(`· ${user.email.padEnd(26)} already exists`);
       users.push({ ...user, id: existing.id });
@@ -85,29 +80,42 @@ async function ensureUsers() {
     }
 
     const hash = await hashPassword(user.password);
-    const { lastInsertRowid } = insertUser.run(
-      user.name, user.email, hash, user.phone, user.address, user.role
-    );
-    users.push({ ...user, id: Number(lastInsertRowid) });
+    /*
+     * `ON CONFLICT (email) DO NOTHING` so two seeds running at once — or a
+     * seed racing a real registration — cannot fail on the unique index. When
+     * nothing is returned the row already exists and is read back below.
+     */
+    const inserted = await sql.run(`
+      INSERT INTO users (name, email, password_hash, phone, address, role)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      ON CONFLICT (email) DO NOTHING
+      RETURNING id
+    `, [user.name, user.email, hash, user.phone, user.address, user.role]);
+
+    const id = inserted.row
+      ? inserted.row.id
+      : (await sql.get('SELECT id FROM users WHERE email = $1', [user.email])).id;
+
+    users.push({ ...user, id });
     console.log(`✓ ${user.email.padEnd(26)} created  (${user.role}, password: ${user.password})`);
   }
 
   return users;
 }
 
-function seedAddresses(users) {
-  const count = db.prepare('SELECT COUNT(*) AS n FROM addresses').get().n;
+async function seedAddresses(users) {
+  const { n: count } = await sql.get('SELECT COUNT(*) AS n FROM addresses');
   if (count > 0) return;
 
-  const insert = db.prepare(`
+  const INSERT = `
     INSERT INTO addresses (user_id, label, recipient, phone, line1, city, pincode, is_default)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `);
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+  `;
 
   for (const user of users.filter((u) => u.role === 'customer')) {
     const [line1, city, pincode] = user.address.split(',').map((s) => s.trim());
-    insert.run(user.id, 'Home', user.name, user.phone, line1, city || 'Bengaluru',
-      (pincode || '').replace(/\D/g, '').slice(0, 6) || '560001', 1);
+    await sql.run(INSERT, [user.id, 'Home', user.name, user.phone, line1, city || 'Bengaluru',
+      (pincode || '').replace(/\D/g, '').slice(0, 6) || '560001', 1]);
   }
   console.log('✓ saved a Home address for each demo customer');
 }
@@ -116,35 +124,40 @@ function seedAddresses(users) {
  * Generates `days` of order history ending yesterday, with a realistic weekday
  * pattern (weekends busier) and lunch/dinner peaks.
  */
-function seedOrderHistory(users, days = 45) {
-  const existing = db.prepare("SELECT COUNT(*) AS n FROM orders WHERE code LIKE 'QB-D%'").get().n;
+async function seedOrderHistory(users, days = 45) {
+  const { n: existing } = await sql.get("SELECT COUNT(*) AS n FROM orders WHERE code LIKE 'QB-D%'");
   if (existing > 0) {
     console.log(`· ${existing} synthetic orders already present — skipped`);
     return 0;
   }
 
   const customers = users.filter((u) => u.role === 'customer');
-  const menu = new Map(
-    db.prepare('SELECT id, slug, name, price, image, prep_minutes FROM menu_items').all()
-      .map((r) => [r.slug, r])
-  );
+  const menuRows = await sql.all('SELECT id, slug, name, price, image, prep_minutes FROM menu_items');
+  const menu = new Map(menuRows.map((r) => [r.slug, r]));
 
-  const insertOrder = db.prepare(`
+  /*
+   * The timestamps below are generated as UTC and handed over with an explicit
+   * `+00` offset, so the demo history lands in the same hour buckets the
+   * analytics queries read it back from whatever zone the server runs in.
+   */
+  const INSERT_ORDER = `
     INSERT INTO orders (code, user_id, status, subtotal, discount, delivery_fee, tax, total,
                         coupon_code, customer_name, phone, address, notes, payment_method,
                         payment_status, eta_minutes, auto_advance, placed_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, 0, ?, ?)
-  `);
-  const insertItem = db.prepare(
-    'INSERT INTO order_items (order_id, item_id, name, image, price, quantity) VALUES (?, ?, ?, ?, ?, ?)'
-  );
-  const insertEvent = db.prepare(
-    'INSERT INTO order_events (order_id, status, note, at) VALUES (?, ?, ?, ?)'
-  );
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, '', $13, $14, $15, 0,
+            $16::timestamptz, $17::timestamptz)
+    RETURNING id
+  `;
+  const INSERT_ITEM =
+    'INSERT INTO order_items (order_id, item_id, name, image, price, quantity) VALUES ($1, $2, $3, $4, $5, $6)';
+  const INSERT_EVENT =
+    'INSERT INTO order_events (order_id, status, note, at) VALUES ($1, $2, $3, $4::timestamptz)';
+  const INSERT_REDEMPTION =
+    'INSERT INTO coupon_redemptions (code, user_id, order_id, amount_off, redeemed_at) VALUES ($1, $2, $3, $4, $5::timestamptz)';
 
   let created = 0;
 
-  transaction(() => {
+  await transaction(async (tx) => {
     for (let dayOffset = days; dayOffset >= 1; dayOffset--) {
       const date = new Date();
       date.setUTCDate(date.getUTCDate() - dayOffset);
@@ -174,55 +187,57 @@ function seedOrderHistory(users, days = 45) {
         // Lunch (12–14) and dinner (19–22) peaks.
         const hour = random() > 0.45 ? between(19, 22) : between(12, 14);
         date.setUTCHours(hour, between(0, 59), between(0, 59), 0);
-        const placedAt = date.toISOString().slice(0, 19).replace('T', ' ');
+        const placedAt = `${date.toISOString().slice(0, 19).replace('T', ' ')}+00`;
 
         const cancelled = random() > 0.94;
         const status = cancelled ? 'cancelled' : 'delivered';
         const paymentMethod = pick(['cod', 'upi', 'card']);
         const eta = Math.max(...lines.map((l) => l.item.prep_minutes)) + 15;
 
-        const { lastInsertRowid } = insertOrder.run(
+        const inserted = await tx.run(INSERT_ORDER, [
           makeCode(++created), customer.id, status,
           subtotal, discount, deliveryFee, tax, total,
           useCoupon ? 'QUICK10' : null,
           customer.name, customer.phone, customer.address,
           paymentMethod, paymentMethod === 'cod' ? 'on_delivery' : 'paid',
-          eta, placedAt, placedAt
-        );
+          eta, placedAt, placedAt,
+        ]);
 
-        const orderId = Number(lastInsertRowid);
+        const orderId = inserted.row.id;
         for (const line of lines) {
-          insertItem.run(orderId, line.item.id, line.item.name, line.item.image, line.item.price, line.quantity);
+          await tx.run(INSERT_ITEM,
+            [orderId, line.item.id, line.item.name, line.item.image, line.item.price, line.quantity]);
         }
 
         const stages = cancelled
           ? ['placed', 'cancelled']
           : ['placed', 'confirmed', 'preparing', 'out_for_delivery', 'delivered'];
-        for (const stage of stages) insertEvent.run(orderId, stage, 'demo data', placedAt);
+        for (const stage of stages) await tx.run(INSERT_EVENT, [orderId, stage, 'demo data', placedAt]);
 
         if (useCoupon) {
-          db.prepare(
-            'INSERT INTO coupon_redemptions (code, user_id, order_id, amount_off, redeemed_at) VALUES (?, ?, ?, ?, ?)'
-          ).run('QUICK10', customer.id, orderId, discount, placedAt);
-          db.prepare('UPDATE coupons SET times_used = times_used + 1 WHERE code = ?').run('QUICK10');
+          await tx.run(INSERT_REDEMPTION, ['QUICK10', customer.id, orderId, discount, placedAt]);
+          await tx.run('UPDATE coupons SET times_used = times_used + 1 WHERE code = $1', ['QUICK10']);
         }
       }
     }
-  })();
+  });
 
   console.log(`✓ generated ${created} synthetic orders across ${days} days (codes start QB-D)`);
   return created;
 }
 
 /** A few reviews so the menu shows real ratings rather than only seeded ones. */
-function seedReviews(users) {
-  if (db.prepare('SELECT COUNT(*) AS n FROM reviews').get().n > 0) return;
+async function seedReviews(users) {
+  if ((await sql.get('SELECT COUNT(*) AS n FROM reviews')).n > 0) return;
 
   const customers = users.filter((u) => u.role === 'customer');
-  const insert = db.prepare(`
-    INSERT OR IGNORE INTO reviews (user_id, item_id, order_id, rating, comment, created_at)
-    VALUES (?, ?, ?, ?, ?, datetime('now', '-3 days'))
-  `);
+  // `ON CONFLICT DO NOTHING` is SQLite's INSERT OR IGNORE; the unique index on
+  // (user_id, item_id) is what it defers to.
+  const INSERT = `
+    INSERT INTO reviews (user_id, item_id, order_id, rating, comment, created_at)
+    VALUES ($1, $2, $3, $4, $5, now() - interval '3 days')
+    ON CONFLICT (user_id, item_id) DO NOTHING
+  `;
 
   const comments = [
     [5, 'Arrived hot and the base was perfect.'],
@@ -234,25 +249,30 @@ function seedReviews(users) {
 
   let added = 0;
   for (const customer of customers) {
-    const delivered = db.prepare(`
+    const delivered = await sql.all(`
       SELECT DISTINCT oi.item_id, o.id AS order_id
       FROM orders o JOIN order_items oi ON oi.order_id = o.id
-      WHERE o.user_id = ? AND o.status = 'delivered' AND oi.item_id IS NOT NULL
+      WHERE o.user_id = $1 AND o.status = 'delivered' AND oi.item_id IS NOT NULL
       LIMIT 4
-    `).all(customer.id);
+    `, [customer.id]);
 
     for (const row of delivered) {
       const [rating, comment] = pick(comments);
-      insert.run(customer.id, row.item_id, row.order_id, rating, comment);
+      await sql.run(INSERT, [customer.id, row.item_id, row.order_id, rating, comment]);
       added += 1;
     }
   }
 
-  // Recompute the headline rating for anything that now has real opinions.
-  db.exec(`
+  /*
+   * Recompute the headline rating for anything that now has real opinions.
+   * `AVG` is numeric, and `rating` is double precision, so the result is cast
+   * rather than relying on an implicit conversion.
+   */
+  await sql.exec(`
     UPDATE menu_items
-    SET rating = (SELECT ROUND(AVG(rating), 2) FROM reviews WHERE reviews.item_id = menu_items.id)
-    WHERE EXISTS (SELECT 1 FROM reviews WHERE reviews.item_id = menu_items.id)
+    SET rating = ROUND(sub.avg_rating, 2)::float8
+    FROM (SELECT item_id, AVG(rating) AS avg_rating FROM reviews GROUP BY item_id) sub
+    WHERE sub.item_id = menu_items.id
   `);
 
   console.log(`✓ added ${added} dish reviews from the demo customers`);
@@ -263,19 +283,22 @@ async function main() {
 
   console.log('\nSeeding QuickBite…\n');
 
+  // Connect, migrate and load the menu before anything references a table.
+  await initDb({ log: true });
+
   const users = await ensureUsers();
-  seedAddresses(users);
+  await seedAddresses(users);
 
   if (!accountsOnly) {
-    seedOrderHistory(users);
-    seedReviews(users);
+    await seedOrderHistory(users);
+    await seedReviews(users);
   }
 
   const counts = {
-    users: db.prepare('SELECT COUNT(*) AS n FROM users').get().n,
-    dishes: db.prepare('SELECT COUNT(*) AS n FROM menu_items WHERE is_available = 1').get().n,
-    orders: db.prepare('SELECT COUNT(*) AS n FROM orders').get().n,
-    reviews: db.prepare('SELECT COUNT(*) AS n FROM reviews').get().n,
+    users: (await sql.get('SELECT COUNT(*) AS n FROM users')).n,
+    dishes: (await sql.get('SELECT COUNT(*) AS n FROM menu_items WHERE is_available = 1')).n,
+    orders: (await sql.get('SELECT COUNT(*) AS n FROM orders')).n,
+    reviews: (await sql.get('SELECT COUNT(*) AS n FROM reviews')).n,
   };
 
   console.log('\n──────────────────────────────────────────────');
@@ -292,7 +315,10 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+main()
+  .then(() => closeDb())
+  .catch(async (err) => {
+    console.error(err.help || err);
+    await closeDb().catch(() => {});
+    process.exit(1);
+  });

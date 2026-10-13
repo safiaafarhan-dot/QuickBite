@@ -11,15 +11,28 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
-  prepareEnvironment, cleanup, makeClient, uniqueEmail,
+  prepareEnvironment, initTestDb, databaseUnavailable, cleanup, makeClient, uniqueEmail,
   GOOD_PASSWORD, VALID_ADDRESS, VALID_PHONE,
 } = require('./helpers');
 
-const DB_FILE = prepareEnvironment('api');
+
+/*
+ * These suites need a real PostgreSQL. Without one they skip loudly rather
+ * than failing or, worse, silently passing — the same contract the browser
+ * suites use when Chrome is unavailable.
+ */
+const unavailable = databaseUnavailable();
+if (unavailable) {
+  console.log(`\n  ⊘ API tests skipped — ${unavailable}\n`);
+  test('API suite needs a PostgreSQL test database', { skip: unavailable }, () => {});
+  return;
+}
+
+const SCHEMA = prepareEnvironment('api');
 
 const app = require('../server/index');
 const { hashPassword } = require('../server/auth');
-const { db } = require('../server/db');
+const { sql } = require('../server/db');
 
 let server;
 let base;
@@ -29,23 +42,22 @@ const call = makeClient(() => base);
 const dish = {};
 
 test.before(async () => {
+  await initTestDb();
   server = app.listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
   base = `http://127.0.0.1:${server.address().port}`;
 
-  db.prepare('INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)').run(
-    'Test Admin', 'admin@test.local', await hashPassword('adminpass1'), 'admin'
-  );
+  await sql.run('INSERT INTO users (name, email, password_hash, role) VALUES ($1, $2, $3, $4)',
+    ['Test Admin', 'admin@test.local', await hashPassword('adminpass1'), 'admin']);
 
-  for (const row of db.prepare('SELECT id, slug, price FROM menu_items').all()) {
+  for (const row of await sql.all('SELECT id, slug, price FROM menu_items')) {
     dish[row.slug] = row;
   }
 });
 
-test.after(() => {
+test.after(async () => {
   server?.close();
-  db.close();
-  cleanup(DB_FILE);
+  await cleanup(SCHEMA);
 });
 
 async function newCustomer() {
@@ -384,7 +396,7 @@ test('a redemption is recorded exactly once per order', async () => {
   const { token, user } = await newCustomer();
   const { order } = await placeOrder(token, { itemSlug: 'butter-chicken', coupon: 'BITE50' });
 
-  const rows = db.prepare('SELECT * FROM coupon_redemptions WHERE order_id = ?').all(order.id);
+  const rows = await sql.all('SELECT * FROM coupon_redemptions WHERE order_id = $1', [order.id]);
   assert.equal(rows.length, 1);
   assert.equal(rows[0].code, 'BITE50');
   assert.equal(rows[0].user_id, user.id);
@@ -557,7 +569,7 @@ test('checkout decrements stock and refuses to oversell', async () => {
   });
   assert.equal(ok.status, 201);
 
-  const after = db.prepare('SELECT stock FROM menu_items WHERE id = ?').get(target.id).stock;
+  const after = (await sql.get('SELECT stock FROM menu_items WHERE id = $1', [target.id])).stock;
   assert.equal(after, 1, 'two portions were taken out of stock');
 
   // Asking for more than is left is refused at the cart, before checkout.
@@ -592,11 +604,11 @@ test('cancelling an order puts its stock back', async () => {
   const { token } = await newCustomer();
   const { order } = await placeOrder(token, { itemSlug: 'spring-rolls', quantity: 3 });
 
-  assert.equal(db.prepare('SELECT stock FROM menu_items WHERE id = ?').get(target.id).stock, 7);
+  assert.equal((await sql.get('SELECT stock FROM menu_items WHERE id = $1', [target.id])).stock, 7);
 
   await call('POST', `/api/orders/${order.id}/cancel`, { token });
   assert.equal(
-    db.prepare('SELECT stock FROM menu_items WHERE id = ?').get(target.id).stock, 10,
+    (await sql.get('SELECT stock FROM menu_items WHERE id = $1', [target.id])).stock, 10,
     'the cancelled portions are available again'
   );
 
@@ -649,7 +661,7 @@ test('cancel works while the order is new and is refused once cooking starts', a
   assert.equal((await call('POST', `/api/orders/${order.id}/cancel`, { token })).status, 409);
 
   const second = await placeOrder(token);
-  db.prepare("UPDATE orders SET status = 'preparing' WHERE id = ?").run(second.order.id);
+  await sql.run("UPDATE orders SET status = 'preparing' WHERE id = $1", [second.order.id]);
 
   const tooLate = await call('POST', `/api/orders/${second.order.id}/cancel`, { token });
   assert.equal(tooLate.status, 409);
@@ -660,7 +672,7 @@ test('orders auto-advance through the lifecycle as time passes', async () => {
   const { token } = await newCustomer();
   const { order } = await placeOrder(token);
 
-  db.prepare("UPDATE orders SET placed_at = datetime('now', '-120 minutes') WHERE id = ?").run(order.id);
+  await sql.run("UPDATE orders SET placed_at = now() - interval '120 minutes' WHERE id = $1", [order.id]);
 
   const after = await call('GET', `/api/orders/${order.id}`, { token });
   assert.equal(after.body.order.status, 'delivered');
@@ -711,7 +723,7 @@ test('a dish can only be reviewed after it has been delivered to you', async () 
   assert.match(early.body.error, /delivered/i);
 
   const { order } = await placeOrder(token, { itemSlug: 'lava-cake' });
-  db.prepare("UPDATE orders SET status = 'delivered' WHERE id = ?").run(order.id);
+  await sql.run("UPDATE orders SET status = 'delivered' WHERE id = $1", [order.id]);
 
   const review = await call('POST', `/api/menu/${id}/reviews`, {
     token, body: { rating: 5, comment: 'Molten in the middle, exactly right.' },

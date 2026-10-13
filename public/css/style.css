@@ -35,6 +35,12 @@
   --text-3:     #9a8777;
   --on-brand:   #ffffff;
 
+  /* The menu surface — see `.section--tint`. Warm light, then texture. */
+  --tint-glow-warm:  rgb(239 139 34 / .15);
+  --tint-glow-brand: rgb(228 67 45 / .10);
+  --tint-glow-leaf:  rgb(46 158 79 / .07);
+  --tint-grain:      rgb(122 84 50 / .05);
+
   /* Elevation */
   --sh-1: 0 1px 2px rgb(74 45 25 / .05), 0 1px 3px rgb(74 45 25 / .06);
   --sh-2: 0 4px 10px rgb(74 45 25 / .07), 0 2px 4px rgb(74 45 25 / .05);
@@ -83,6 +89,11 @@
   --text-2:     #b2a194;
   --text-3:     #85766a;
   --on-brand:   #ffffff;
+
+  --tint-glow-warm:  rgb(245 169 78 / .08);
+  --tint-glow-brand: rgb(255 111 82 / .07);
+  --tint-glow-leaf:  rgb(82 201 122 / .05);
+  --tint-grain:      rgb(255 240 225 / .035);
 
   --sh-1: 0 1px 2px rgb(0 0 0 / .4);
   --sh-2: 0 4px 10px rgb(0 0 0 / .45);
@@ -412,7 +423,74 @@ h1, h2, h3, h4 { line-height: 1.2; letter-spacing: -.022em; font-weight: 700; }
 /* ---------------------------------------------------------------- */
 
 .section { padding: 54px 0; }
-.section--tint { background: var(--surface-2); border-block: 1px solid var(--border); }
+/*
+ * The menu's surface.
+ *
+ * Thirty photographs sit on this, so the job is warmth without
+ * competition. Three things do it:
+ *
+ *   the wash   the section fades up out of the page colour and back
+ *              into it, so the menu reads as a warm pool rather than a
+ *              slab bolted between two hairlines;
+ *   the light  three very diffuse brand-coloured glows, sized in pixels
+ *              rather than percentages. The section is some 3,700px
+ *              tall, and percentage-sized radials would stretch into
+ *              shapeless bands; pixels keep them where they are worth
+ *              having — behind the heading and the filters, and at the
+ *              foot — and leave the middle, which is wall-to-wall
+ *              photographs, clean;
+ *   the grain  a fine dot screen for the texture of printed card.
+ *
+ * No animation: this is the one screen that has to feel instant, and
+ * the restraint the rest of the page shows in not choreographing the
+ * menu would be wasted if its background drew the eye instead.
+ *
+ * Painted on pseudo-elements behind the content, so the dish grid keeps
+ * its own stacking order and none of it can intercept a click. Every
+ * colour is a token, so dark is the same composition in its own key.
+ */
+.section--tint {
+  position: relative;
+  isolation: isolate;
+  background:
+    linear-gradient(
+      180deg,
+      var(--bg) 0,
+      var(--surface-2) 130px,
+      var(--surface-2) calc(100% - 150px),
+      var(--bg) 100%
+    );
+}
+
+.section--tint::before,
+.section--tint::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+
+.section--tint::before {
+  background:
+    radial-gradient(900px 520px at 10% 0,      var(--tint-glow-warm),  transparent 70%),
+    radial-gradient(760px 460px at 96% 240px,  var(--tint-glow-brand), transparent 72%),
+    /*
+     * Two more down the middle, alternating sides. Without them the
+     * long scroll between the filters and the foot is flat cream for
+     * two thousand pixels. Offsets past the end of a filtered-down
+     * section simply never paint, which is why they are stated from the
+     * top rather than as percentages.
+     */
+    radial-gradient(820px 460px at 92% 1500px, var(--tint-glow-warm),  transparent 72%),
+    radial-gradient(860px 480px at 4% 2450px,  var(--tint-glow-brand), transparent 72%),
+    radial-gradient(820px 480px at 0 100%,     var(--tint-glow-leaf),  transparent 70%);
+}
+
+.section--tint::after {
+  background-image: radial-gradient(circle at 1px 1px, var(--tint-grain) 1.1px, transparent 1.6px);
+  background-size: 22px 22px;
+}
 
 .section-head {
   display: flex; align-items: flex-end; justify-content: space-between;

@@ -1,6 +1,16 @@
 node_modules/
-data/
+
+# The SQLite database and its backups, at the repository root only.
+# Anchored with a leading slash on purpose: a bare `data/` also matches
+# `server/data/`, which holds menu.js — the canonical 30-dish menu the app
+# seeds from. Ignoring that made the app un-deployable from a clean clone.
+/data/
+
+# Never commit a filled-in environment file, under any of its usual names.
 .env
+.env.*
+!.env.example
+
 *.log
 *.bak
 public/images/dishes/_candidate-*

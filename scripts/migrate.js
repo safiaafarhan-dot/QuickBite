@@ -3,80 +3,72 @@
 /**
  * Runs pending database migrations and reports the schema state.
  *
- *   npm run migrate            # apply anything outstanding
+ *   npm run migrate              # apply anything outstanding
  *   npm run migrate -- --status  # report only, change nothing
- *   npm run migrate -- --backup  # copy the database file first
  *
  * This is the command to run on deploy, before starting the server. It is safe
- * to run repeatedly: each migration is applied at most once.
+ * to run repeatedly: each migration is applied at most once, and a PostgreSQL
+ * advisory lock keeps two instances deploying at the same time from racing.
+ *
+ * `--backup` is gone. Under SQLite it copied a file; a managed PostgreSQL has
+ * no file to copy, and pretending otherwise would be worse than saying so.
+ * Supabase takes its own daily backups, and `pg_dump "$DATABASE_URL"` is the
+ * command for an on-demand one — see DEPLOYMENT.md.
  */
 
-const fs = require('node:fs');
-const path = require('node:path');
+const { sql, initDb, closeDb, describeConnection, CONNECTION_HELP } = require('../server/db');
+const { MIGRATIONS, hasTable } = require('../server/migrations');
 
 const statusOnly = process.argv.includes('--status');
-const wantBackup = process.argv.includes('--backup');
 
-// Importing the database module applies migrations as a side effect, so for a
-// status-only run we open the file read-only first.
-const DB_FILE = process.env.DB_FILE
-  ? path.resolve(process.env.DB_FILE)
-  : path.join(__dirname, '..', 'data', 'quickbite.db');
-
-function backup() {
-  if (!fs.existsSync(DB_FILE)) {
-    console.log('· no database file yet — nothing to back up');
-    return null;
-  }
-
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const target = `${DB_FILE}.${stamp}.bak`;
-  fs.copyFileSync(DB_FILE, target);
-  console.log(`✓ backup written to ${path.basename(target)}`);
-  return target;
+if (process.argv.includes('--backup')) {
+  console.error('\n  ✗ --backup is not available for PostgreSQL.');
+  console.error('    Take one with:  pg_dump "$DATABASE_URL" > quickbite-backup.sql\n');
+  process.exit(1);
 }
 
-function status() {
-  const { DatabaseSync } = require('node:sqlite');
+if (!process.env.DATABASE_URL) {
+  console.error(CONNECTION_HELP);
+  process.exit(1);
+}
 
-  if (!fs.existsSync(DB_FILE)) {
-    console.log(`No database at ${DB_FILE} — it will be created on first run.`);
-    return;
+/** Reports what has run without applying anything. */
+async function status() {
+  // Touch the pool without migrating, so a status run really is read-only.
+  const applied = new Set();
+
+  if (await hasTable(sql, 'schema_migrations')) {
+    const rows = await sql.all('SELECT name FROM schema_migrations');
+    for (const row of rows) applied.add(row.name);
   }
 
-  const db = new DatabaseSync(DB_FILE);
-  const { MIGRATIONS } = require('../server/migrations');
-
-  const applied = new Set(
-    db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='schema_migrations'").get()
-      ? db.prepare('SELECT name FROM schema_migrations').all().map((r) => r.name)
-      : []
-  );
-
-  console.log(`\nDatabase: ${DB_FILE}\n`);
+  console.log(`\nDatabase: ${describeConnection()}\n`);
   for (const migration of MIGRATIONS) {
     console.log(`  ${applied.has(migration.name) ? '✓' : '·'} ${migration.name}`);
   }
 
   const pending = MIGRATIONS.filter((m) => !applied.has(m.name)).length;
   console.log(`\n${pending === 0 ? 'Up to date.' : `${pending} migration(s) pending.`}\n`);
-
-  db.close();
 }
 
-function main() {
+async function main() {
   if (statusOnly) return status();
 
-  if (wantBackup) backup();
+  console.log(`\nMigrating ${describeConnection()}\n`);
 
-  // Loading the module runs `migrate()` and logs each migration it applies.
-  console.log(`\nMigrating ${DB_FILE}\n`);
-  const { db } = require('../server/db');
+  // `initDb` applies the migrations and then brings the menu and coupons in
+  // line with the source files — the same work the server does on boot.
+  await initDb({ log: true });
 
-  const applied = db.prepare('SELECT name, applied_at FROM schema_migrations ORDER BY name').all();
+  const applied = await sql.all('SELECT name, applied_at FROM schema_migrations ORDER BY name');
   console.log(`\n✓ schema is at ${applied.length} migration(s); latest: ${applied.at(-1)?.name ?? 'none'}\n`);
-
-  db.close();
 }
 
-main();
+main()
+  .then(() => closeDb())
+  .catch(async (err) => {
+    console.error(`\n  ✗ ${err.message}`);
+    if (err.help) console.error(err.help);
+    await closeDb().catch(() => {});
+    process.exit(1);
+  });

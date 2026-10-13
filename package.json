@@ -2,7 +2,7 @@
   "name": "quickbite",
   "version": "1.0.0",
   "private": true,
-  "description": "QuickBite — a full-stack AI-assisted food ordering app (Express + SQLite + vanilla JS).",
+  "description": "QuickBite — a full-stack AI-assisted food ordering app (Express + PostgreSQL + vanilla JS).",
   "main": "server/index.js",
   "engines": {
     "node": ">=22.5"
@@ -19,7 +19,7 @@
     "test:ui": "node --test tests/ui.test.js",
     "test:ai": "node --test tests/ai.test.js",
     "test:security": "node --test tests/security.test.js",
-    "reset": "node -e \"require('node:fs').rmSync('data',{recursive:true,force:true})\" && npm run seed",
+    "reset": "node scripts/reset-db.js",
     "audit:deps": "npm audit --omit=dev",
     "test:browser": "node --test tests/browser.test.js",
     "test:assets": "node --test tests/assets.test.js",
@@ -27,12 +27,16 @@
     "qa:visual": "node scripts/visual-qa.js",
     "credits": "node scripts/fetch-images.js --credits-only",
     "build:3d": "node scripts/build-cinematic.js",
-    "test:3d": "node --test tests/cinematic.test.js"
+    "test:3d": "node --test tests/cinematic.test.js",
+    "migrate:status": "node scripts/migrate.js --status",
+    "import:sqlite": "node scripts/import-sqlite.js",
+    "deploy:migrate": "node scripts/migrate.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
     "express": "^4.21.2",
-    "jsonwebtoken": "^9.0.2"
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.16.3"
   },
   "devDependencies": {
     "esbuild": "^0.28.2",

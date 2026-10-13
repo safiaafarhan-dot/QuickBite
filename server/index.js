@@ -23,12 +23,19 @@ if (require.main === module) {
     process.exit(1);
   }
 
+  // The data no longer lives in a file next to the process; without a
+  // connection string there is nothing to serve, in any environment.
+  if (!process.env.DATABASE_URL) {
+    console.error(require('./db').CONNECTION_HELP);
+    process.exit(1);
+  }
+
   if (process.env.NODE_ENV === 'production' && !process.env.PAYMENT_WEBHOOK_SECRET) {
     console.warn('  ⚠ PAYMENT_WEBHOOK_SECRET is unset — the payment webhook will reject every call.\n');
   }
 }
 
-const { db, DB_FILE } = require('./db');
+const { sql, initDb, closeDb, describeConnection } = require('./db');
 const { attachUser } = require('./auth');
 const { securityHeaders, rateLimit, requestLogger } = require('./middleware');
 const { router: cartRouter } = require('./routes/cart');
@@ -65,17 +72,19 @@ app.use('/api', rateLimit({
   keyPrefix: 'api',
 }));
 
-app.get('/api/health', (_req, res) => {
+app.get('/api/health', async (_req, res) => {
   // Prove the database actually answers, not just that the process is up.
   try {
-    const menu = db.prepare('SELECT COUNT(*) AS n FROM menu_items WHERE is_available = 1').get().n;
-    const migrations = db.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get().n;
+    const [menu, migrations] = await Promise.all([
+      sql.get('SELECT COUNT(*) AS n FROM menu_items WHERE is_available = 1'),
+      sql.get('SELECT COUNT(*) AS n FROM schema_migrations'),
+    ]);
     res.json({
       ok: true,
       status: 'healthy',
-      database: path.basename(DB_FILE),
-      migrations,
-      menu_items: menu,
+      database: describeConnection(),
+      migrations: migrations.n,
+      menu_items: menu.n,
       uptime_seconds: Math.round(process.uptime()),
       version: require('../package.json').version,
     });
@@ -148,36 +157,59 @@ app.use((err, req, res, _next) => {
 /* ------------------------------------------------------------------ */
 
 if (require.main === module) {
-  const server = app.listen(PORT, () => {
-    console.log(`\n  🍔 QuickBite running at http://localhost:${PORT}`);
-    console.log(`  📦 Database: ${DB_FILE}`);
-    console.log(`  🤖 AI assistant: ${process.env.ANTHROPIC_API_KEY ? 'LLM-backed' : 'built-in rules'}\n`);
+  /*
+   * The database is reached over a network now, so the schema has to be in
+   * place before the first request rather than as a side effect of loading a
+   * module. Render routes traffic as soon as the port is open, so the listen
+   * call waits until `initDb()` has migrated and seeded — a request that
+   * arrived first would otherwise hit tables that did not exist yet.
+   */
+  const started = initDb().catch((err) => {
+    console.error(`\n  ✗ Could not reach the database: ${err.message}`);
+    if (err.help) console.error(err.help);
+    else {
+      console.error('\n    Check DATABASE_URL, that the database is reachable from here,');
+      console.error('    and that its password is current.\n');
+    }
+    process.exit(1);
+  });
+
+  let server;
+
+  started.then(() => {
+    server = app.listen(PORT, () => {
+      console.log(`\n  🍔 QuickBite running at http://localhost:${PORT}`);
+      console.log(`  📦 Database: ${describeConnection()}`);
+      console.log(`  🤖 AI assistant: ${process.env.ANTHROPIC_API_KEY ? 'LLM-backed' : 'built-in rules'}\n`);
+    });
+    attachServerHandlers(server);
   });
 
   /*
    * Without a listener here, a busy port raises an unhandled 'error' event and
    * the operator gets a stack trace rather than something they can act on.
    */
-  server.on('error', (err) => {
-    if (err.code === 'EADDRINUSE') {
-      console.error(`\n  ✗ Port ${PORT} is already in use.`);
-      console.error('    Another QuickBite may still be running. Stop it, or start this one');
-      console.error('    on a different port:   PORT=3001 npm start\n');
-    } else if (err.code === 'EACCES') {
-      console.error(`\n  ✗ Not allowed to bind port ${PORT}. Ports below 1024 need elevated`);
-      console.error('    privileges — use a higher port and put a reverse proxy in front.\n');
-    } else {
-      console.error(`\n  ✗ Could not start the server: ${err.message}\n`);
-    }
-    process.exit(1);
-  });
+  function attachServerHandlers(srv) {
+    srv.on('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        console.error(`\n  ✗ Port ${PORT} is already in use.`);
+        console.error('    Another QuickBite may still be running. Stop it, or start this one');
+        console.error('    on a different port:   PORT=3001 npm start\n');
+      } else if (err.code === 'EACCES') {
+        console.error(`\n  ✗ Not allowed to bind port ${PORT}. Ports below 1024 need elevated`);
+        console.error('    privileges — use a higher port and put a reverse proxy in front.\n');
+      } else {
+        console.error(`\n  ✗ Could not start the server: ${err.message}\n`);
+      }
+      process.exit(1);
+    });
+  }
 
   const shutdown = (signal) => {
     console.log(`\n${signal} received — closing server.`);
-    server.close(() => {
-      db.close();
-      process.exit(0);
-    });
+    const done = () => closeDb().then(() => process.exit(0), () => process.exit(0));
+    if (server) server.close(done);
+    else done();
     // Do not hang forever on a stuck connection.
     setTimeout(() => process.exit(1), 10_000).unref();
   };

@@ -20,15 +20,28 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
-  prepareEnvironment, cleanup, makeClient,
+  prepareEnvironment, initTestDb, databaseUnavailable, cleanup, makeClient,
   GOOD_PASSWORD, VALID_ADDRESS, VALID_PHONE,
 } = require('./helpers');
 
-const DB_FILE = prepareEnvironment('browser');
+
+/*
+ * These suites need a real PostgreSQL. Without one they skip loudly rather
+ * than failing or, worse, silently passing — the same contract this file
+ * already uses when Chrome is unavailable.
+ */
+const dbUnavailable = databaseUnavailable();
+if (dbUnavailable) {
+  console.log(`\n  ⊘ Browser tests skipped — ${dbUnavailable}\n`);
+  test('Browser suite needs a PostgreSQL test database', { skip: dbUnavailable }, () => {});
+  return;
+}
+
+const SCHEMA = prepareEnvironment('browser');
 
 const app = require('../server/index');
 const { hashPassword } = require('../server/auth');
-const { db } = require('../server/db');
+const { sql } = require('../server/db');
 
 /* ------------------------------------------------------------------ */
 /* Availability check                                                  */
@@ -49,14 +62,15 @@ let browser;
 const call = makeClient(() => base);
 
 test.before(async () => {
+  await initTestDb();
   server = app.listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
   base = `http://127.0.0.1:${server.address().port}`;
 
-  db.prepare('INSERT INTO users (name, email, password_hash, phone, address, role) VALUES (?, ?, ?, ?, ?, ?)')
-    .run('Browser Tester', 'browser@test.local', await hashPassword(GOOD_PASSWORD), VALID_PHONE, VALID_ADDRESS, 'customer');
-  db.prepare('INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)')
-    .run('Browser Admin', 'browseradmin@test.local', await hashPassword('adminpass1'), 'admin');
+  await sql.run('INSERT INTO users (name, email, password_hash, phone, address, role) VALUES ($1, $2, $3, $4, $5, $6)',
+    ['Browser Tester', 'browser@test.local', await hashPassword(GOOD_PASSWORD), VALID_PHONE, VALID_ADDRESS, 'customer']);
+  await sql.run('INSERT INTO users (name, email, password_hash, role) VALUES ($1, $2, $3, $4)',
+    ['Browser Admin', 'browseradmin@test.local', await hashPassword('adminpass1'), 'admin']);
 
   if (chromium) {
     try {
@@ -74,8 +88,7 @@ test.before(async () => {
 test.after(async () => {
   await browser?.close();
   server?.close();
-  db.close();
-  cleanup(DB_FILE);
+  await cleanup(SCHEMA);
 });
 
 /** Opens a page at a given viewport, optionally already signed in. */
@@ -426,20 +439,27 @@ test('the 404 page still applies the saved theme', skipIf(), async () => {
 test('the admin bar charts render with real heights, not a flat line', skipIf(), async () => {
   // Give the charts something with shape to draw: orders at three different
   // hours, with different volumes, so bars of equal height would be a bug.
-  const customer = db.prepare('SELECT id FROM users WHERE email = ?').get('browser@test.local');
-  const insert = db.prepare(`
+  const customer = await sql.get('SELECT id FROM users WHERE email = $1', ['browser@test.local']);
+  /*
+   * The timestamps are written with an explicit UTC offset. The analytics
+   * queries bucket by UTC hour, so a bare 'YYYY-MM-DD HH:MM:SS' would be read
+   * in the server's own zone and the three hour-buckets this test builds
+   * would land somewhere else entirely.
+   */
+  const INSERT_CHART_ORDER = `
     INSERT INTO orders (code, user_id, status, subtotal, discount, delivery_fee, tax, total,
                         customer_name, phone, address, payment_method, payment_status,
                         eta_minutes, auto_advance, placed_at, updated_at)
-    VALUES (?, ?, 'delivered', 500, 0, 0, 25, 525, 'Browser Tester', ?, ?, 'cod', 'on_delivery',
-            35, 0, ?, ?)
-  `);
+    VALUES ($1, $2, 'delivered', 500, 0, 0, 25, 525, 'Browser Tester', $3, $4, 'cod', 'on_delivery',
+            35, 0, $5::timestamptz, $6::timestamptz)
+  `;
 
   let n = 0;
   for (const [hour, count] of [[12, 1], [13, 3], [20, 2]]) {
     for (let i = 0; i < count; i++) {
-      const at = `2025-01-0${(i % 3) + 1} ${String(hour).padStart(2, '0')}:15:00`;
-      insert.run(`QB-CHART${n++}`, customer.id, VALID_PHONE, VALID_ADDRESS, at, at);
+      const at = `2025-01-0${(i % 3) + 1} ${String(hour).padStart(2, '0')}:15:00+00`;
+      await sql.run(INSERT_CHART_ORDER,
+        [`QB-CHART${n++}`, customer.id, VALID_PHONE, VALID_ADDRESS, at, at]);
     }
   }
 
